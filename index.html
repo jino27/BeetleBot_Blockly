@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>BeetleBot</title>
+  
+  <!-- PWA -->
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#1a1a1a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  
+  <style>
+    body { 
+      margin: 0; 
+      background: #1a1a1a; 
+      color: #fff;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      overflow: hidden;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <span class="logo-icon">◆</span>
+        <span class="logo-text">BeetleBot</span>
+      </div>
+      <div class="header-right">
+        <div class="status">
+          <span class="status-dot" id="status-dot"></span>
+          <span class="status-text" id="status-text">Offline</span>
+        </div>
+        <button class="btn btn-primary" id="btn-connect">Connect</button>
+      </div>
+    </header>
+
+    <!-- Main -->
+    <main class="main">
+      <!-- Blockly Workspace -->
+      <div class="workspace">
+        <div id="blocklyDiv"></div>
+      </div>
+
+      <!-- Sidebar -->
+      <aside class="sidebar">
+        <!-- IP Config -->
+        <div class="panel">
+          <label class="panel-label">Robot IP</label>
+          <div class="input-group">
+            <input type="text" id="esp-ip" class="input" value="192.168.1.100" placeholder="IP Address">
+            <button class="btn btn-icon" id="btn-save-ip" title="Save">✓</button>
+          </div>
+        </div>
+
+        <!-- Quick Controls -->
+        <div class="panel">
+          <label class="panel-label">Controls</label>
+          <div class="d-pad">
+            <button class="d-btn d-up" id="btn-fwd">▲</button>
+            <button class="d-btn d-left" id="btn-left">◀</button>
+            <button class="d-btn d-stop" id="btn-stop">■</button>
+            <button class="d-btn d-right" id="btn-right">▶</button>
+            <button class="d-btn d-down" id="btn-bwd">▼</button>
+          </div>
+          <div class="claw-row">
+            <button class="btn btn-secondary" id="btn-open">Open</button>
+            <button class="btn btn-secondary" id="btn-close">Close</button>
+          </div>
+        </div>
+
+        <!-- Run -->
+        <div class="panel">
+          <button class="btn btn-run" id="btn-run">▶ Run Program</button>
+          <button class="btn btn-danger" id="btn-stop-program">⏹ Stop</button>
+        </div>
+
+        <!-- Code Preview -->
+        <div class="panel panel-code">
+          <label class="panel-label">Commands</label>
+          <pre class="code-preview" id="code-preview">// Drag blocks to workspace</pre>
+        </div>
+
+        <!-- Log -->
+        <div class="panel panel-log">
+          <label class="panel-label">Log</label>
+          <div class="log" id="serial-log"></div>
+          <button class="btn btn-text" id="btn-clear-log">Clear</button>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/service-worker.js')
+        .then(() => console.log('SW registered'))
+        .catch((err) => console.log('SW failed', err));
+    }
+  </script>
+</body>
+</html>
