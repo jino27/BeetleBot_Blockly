@@ -24,7 +24,7 @@ export class CommandExecutor {
     try {
       for (let i = 0; i < queue.length; i++) {
         if (this.abortController.signal.aborted) break;
-        await this.executeItem(queue[i]);
+        await this.executeItem(queue[i], this.abortController.signal);
       }
     } finally {
       this.running = false;
@@ -35,14 +35,13 @@ export class CommandExecutor {
   stop(): void {
     if (this.abortController) this.abortController.abort();
     this.running = false;
-    this.wifi.sendCommand('S').catch(() => {});
-    this.wifi.sendCommand('BRAKE').catch(() => {});
+    this.wifi.sendCommand('CLEAR').catch(() => {});
   }
 
-  private async executeItem(item: CommandItem): Promise<void> {
+  private async executeItem(item: CommandItem, signal?: AbortSignal): Promise<void> {
     switch (item.cmd) {
       case 'WAIT':
-        await this.sleep(item.ms || 0);
+        await this.sleep(item.ms || 0, signal);
         break;
       case 'SPEED':
         await this.wifi.sendCommand(`SPEED:${item.val}`);
@@ -54,11 +53,29 @@ export class CommandExecutor {
       }
       default:
         await this.wifi.sendCommand(item.cmd);
-        await this.sleep(50);
+        await this.sleep(50, signal);
     }
   }
 
-  private sleep(ms: number): Promise<void> {
-    return new Promise(r => setTimeout(r, ms));
+  private sleep(ms: number, signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve) => {
+      if (signal?.aborted) {
+        resolve();
+        return;
+      }
+
+      const timeout = setTimeout(() => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      }, ms);
+
+      const onAbort = () => {
+        clearTimeout(timeout);
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      };
+
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
   }
 }

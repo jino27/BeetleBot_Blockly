@@ -1,6 +1,7 @@
 import * as Blockly from 'blockly/core';
 import { javascriptGenerator } from 'blockly/javascript';
 import 'blockly/blocks';
+import { registerFieldAngle } from '@blockly/field-angle';
 
 import { defineBeetleBotBlocks } from './blocks/beetlebot_blocks';
 import { initBeetleBotGenerator, generateCommandQueue, CommandItem } from './generators/beetlebot_generator';
@@ -26,6 +27,8 @@ function getToolbox(): Blockly.utils.toolbox.ToolboxDefinition {
           { kind: 'block', type: 'move_backward' },
           { kind: 'block', type: 'turn_left' },
           { kind: 'block', type: 'turn_right' },
+          { kind: 'block', type: 'turn_left_angle' },
+          { kind: 'block', type: 'turn_right_angle' },
           { kind: 'block', type: 'stop' },
           { kind: 'block', type: 'brake' },
         ],
@@ -69,7 +72,7 @@ function getToolbox(): Blockly.utils.toolbox.ToolboxDefinition {
             kind: 'block',
             type: 'set_speed',
             inputs: {
-              SPEED: { shadow: { type: 'math_number', fields: { NUM: 150 } } },
+              SPEED: { shadow: { type: 'math_number', fields: { NUM: 100 } } },
             },
           },
           {
@@ -96,6 +99,7 @@ function getToolbox(): Blockly.utils.toolbox.ToolboxDefinition {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  registerFieldAngle();
   defineBeetleBotBlocks();
   initBeetleBotGenerator();
 
