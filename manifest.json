@@ -1,0 +1,10 @@
+{
+  "name": "Beetlebot Blockly",
+  "short_name": "Beetlebot",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#000000",
+  "description": "A web-based visual programming editor.",
+  "icon": "src/assets/img/icon-512x512.png"
+}
