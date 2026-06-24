@@ -29,6 +29,7 @@ const COLOUR_DECISIONS = "#eab308"; // Yellow
 const COLOUR_LOGIC = "#8b5cf6"; // Purple
 const COLOUR_EVENTS = "#ef4444"; // Red
 const COLOUR_SENSORS = "#06b6d4"; // Cyan
+const COLOUR_VARIABLES = "#14b8a6"; // Teal
 
 function getToolbox(): Blockly.utils.toolbox.ToolboxDefinition {
   return {
@@ -150,6 +151,20 @@ function getToolbox(): Blockly.utils.toolbox.ToolboxDefinition {
         colour: COLOUR_SENSORS,
         contents: [
           // TODO: Add sensor blocks later
+        ],
+      },
+
+      // ========================================================================
+      // 🔢 VARIABLES (Teal)
+      // ========================================================================
+      {
+        kind: "category",
+        name: "🔢 Variables",
+        colour: COLOUR_VARIABLES,
+        contents: [
+          { kind: "block", type: "variable_set" },
+          { kind: "block", type: "variable_get" },
+          { kind: "block", type: "variable_change" },
         ],
       },
     ],
@@ -293,12 +308,12 @@ function stopProgram(): void {
 }
 
 function updatePreview(): void {
-  const queue = generateCommandQueue(workspace);
-  const text = queue
-    .map((c: CommandItem, i: number) => `${i + 1}. ${JSON.stringify(c)}`)
-    .join("\n");
+  // Only generate the code string - don't execute it!
+  // Executing while loops during editing can cause crashes
+  const code = javascriptGenerator.workspaceToCode(workspace);
+  const text = code || "// Drag blocks here";
   const el = document.getElementById("code-preview");
-  if (el) el.textContent = text || "// Drag blocks";
+  if (el) el.textContent = text;
 }
 
 function log(msg: string, type: "sent" | "received" | "error" = "sent"): void {

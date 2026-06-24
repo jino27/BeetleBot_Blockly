@@ -39,6 +39,10 @@ export const BLOCK_TYPES = {
   LOGIC_NOT: "beetlebot_not",
   TRUE: "beetlebot_true",
   FALSE: "beetlebot_false",
+  // 🔢 Variables (Teal)
+  VARIABLE_SET: "variable_set",
+  VARIABLE_GET: "variable_get",
+  VARIABLE_CHANGE: "variable_change",
 } as const;
 
 // ============================================================================
@@ -53,6 +57,8 @@ const COLOUR_DECISIONS = "#eab308"; // Yellow
 const COLOUR_LOGIC = "#8b5cf6"; // Purple
 const COLOUR_EVENTS = "#ef4444"; // Red
 const COLOUR_SENSORS = "#06b6d4"; // Cyan
+
+const COLOUR_VARIABLES = "#14b8a6"; // Teal
 
 // ============================================================================
 // DEFINE ALL BLOCKS
@@ -111,11 +117,11 @@ export function defineBeetleBotBlocks() {
       message0: "↩️ Turn Left %1°",
       args0: [
         {
-          type: "field_number",
+          type: "field_angle",
           name: "ANGLE",
           value: 90,
-          min: 1,
-          max: 360,
+          offset: 90,
+          clockwise: false,
         },
       ],
       previousStatement: null,
@@ -128,11 +134,11 @@ export function defineBeetleBotBlocks() {
       message0: "↪️ Turn Right %1°",
       args0: [
         {
-          type: "field_number",
+          type: "field_angle",
           name: "ANGLE",
           value: 90,
-          min: 1,
-          max: 360,
+          offset: 90,
+          clockwise: true,
         },
       ],
       previousStatement: null,
@@ -237,7 +243,7 @@ export function defineBeetleBotBlocks() {
       previousStatement: null,
       nextStatement: null,
       colour: COLOUR_LOOPS,
-      tooltip: "Repeat while condition is true",
+      tooltip: "Repeat while condition is true (with max iterations)",
     },
 
     // ========================================================================
@@ -394,6 +400,64 @@ export function defineBeetleBotBlocks() {
       output: "Boolean",
       colour: COLOUR_LOGIC,
       tooltip: "False/No value",
+    },
+
+    // ========================================================================
+    // 🔢 VARIABLE BLOCKS
+    // ========================================================================
+    {
+      type: BLOCK_TYPES.VARIABLE_SET,
+      message0: "📦 Set %1 = %2",
+      args0: [
+        {
+          type: "field_input",
+          name: "VAR_NAME",
+          text: "counter",
+        },
+        {
+          type: "input_value",
+          name: "VALUE",
+          check: "Number",
+        },
+      ],
+      previousStatement: null,
+      nextStatement: null,
+      colour: COLOUR_VARIABLES,
+      tooltip: "Set a variable to a value",
+    },
+    {
+      type: BLOCK_TYPES.VARIABLE_GET,
+      message0: "📦 %1",
+      args0: [
+        {
+          type: "field_input",
+          name: "VAR_NAME",
+          text: "counter",
+        },
+      ],
+      output: "Number",
+      colour: COLOUR_VARIABLES,
+      tooltip: "Get a variable value",
+    },
+    {
+      type: BLOCK_TYPES.VARIABLE_CHANGE,
+      message0: "📦 Change %1 by %2",
+      args0: [
+        {
+          type: "field_input",
+          name: "VAR_NAME",
+          text: "counter",
+        },
+        {
+          type: "input_value",
+          name: "DELTA",
+          check: "Number",
+        },
+      ],
+      previousStatement: null,
+      nextStatement: null,
+      colour: COLOUR_VARIABLES,
+      tooltip: "Change a variable by a value (positive or negative)",
     },
   ]);
 }

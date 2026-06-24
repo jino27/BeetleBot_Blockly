@@ -83,8 +83,7 @@ export function initBeetleBotGenerator(): void {
     const condition =
       generator.valueToCode(block, "CONDITION", Order.NONE) || "false";
     const branch = generator.statementToCode(block, "DO");
-    // Safety limit: max 10 iterations to prevent infinite loops and huge queues
-    return `for (let _i = 0; _i < 10 && (${condition}); _i++) {\n${branch}}\n`;
+    return `while (${condition}) {\n${branch}}\n`;
   };
 
   // ========================================================================
@@ -110,8 +109,13 @@ export function initBeetleBotGenerator(): void {
   // ========================================================================
   javascriptGenerator.forBlock[BLOCK_TYPES.COMPARE] = (block, generator) => {
     const op = block.getFieldValue("OP") || "EQ";
-    const left = generator.valueToCode(block, "A", Order.NONE) || "0";
-    const right = generator.valueToCode(block, "B", Order.NONE) || "0";
+    const left = generator.valueToCode(block, "A", Order.NONE);
+    const right = generator.valueToCode(block, "B", Order.NONE);
+
+    // If either input is empty, default to false to prevent infinite while loops
+    if (!left || !right) {
+      return ["false", Order.ATOMIC];
+    }
 
     const operators: Record<string, string> = {
       EQ: "===",
@@ -149,6 +153,36 @@ export function initBeetleBotGenerator(): void {
     "false",
     Order.ATOMIC,
   ];
+
+  // ========================================================================
+  // 🔢 VARIABLES
+  // ========================================================================
+  javascriptGenerator.forBlock[BLOCK_TYPES.VARIABLE_SET] = (
+    block,
+    generator,
+  ) => {
+    const varName = block.getFieldValue("VAR_NAME") || "counter";
+    const value = generator.valueToCode(block, "VALUE", Order.NONE) || "0";
+    // Sanitize variable name for JS
+    const safeName = varName.replace(/[^a-zA-Z0-9_]/g, "_");
+    return `var ${safeName} = ${value};\n`;
+  };
+
+  javascriptGenerator.forBlock[BLOCK_TYPES.VARIABLE_GET] = (block) => {
+    const varName = block.getFieldValue("VAR_NAME") || "counter";
+    const safeName = varName.replace(/[^a-zA-Z0-9_]/g, "_");
+    return [safeName, Order.ATOMIC];
+  };
+
+  javascriptGenerator.forBlock[BLOCK_TYPES.VARIABLE_CHANGE] = (
+    block,
+    generator,
+  ) => {
+    const varName = block.getFieldValue("VAR_NAME") || "counter";
+    const delta = generator.valueToCode(block, "DELTA", Order.NONE) || "1";
+    const safeName = varName.replace(/[^a-zA-Z0-9_]/g, "_");
+    return `var ${safeName} = (${safeName} || 0) + ${delta};\n`;
+  };
 }
 
 export function generateCommandQueue(
