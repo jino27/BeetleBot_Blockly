@@ -86,6 +86,30 @@ export function initBeetleBotGenerator(): void {
     return `while (${condition}) {\n${branch}}\n`;
   };
 
+  javascriptGenerator.forBlock[BLOCK_TYPES.REPEAT_UNTIL] = (
+    block,
+    generator,
+  ) => {
+    const condition =
+      generator.valueToCode(block, "CONDITION", Order.NONE) || "false";
+    const branch = generator.statementToCode(block, "DO");
+    return `while (!(${condition})) {\n${branch}}\n`;
+  };
+
+  javascriptGenerator.forBlock[BLOCK_TYPES.COUNT_WITH] = (
+    block,
+    generator,
+  ) => {
+    const rawVar = block.getFieldValue("VAR") || "i";
+    const safeVar = rawVar.replace(/[^a-zA-Z0-9_]/g, "_");
+    const from = generator.valueToCode(block, "FROM", Order.NONE) || "1";
+    const to = generator.valueToCode(block, "TO", Order.NONE) || "10";
+    const branch = generator.statementToCode(block, "DO");
+    return `for (var ${safeVar} = ${from}; ${safeVar} <= ${to}; ${safeVar}++) {\n${branch}}\n`;
+  };
+
+  javascriptGenerator.forBlock[BLOCK_TYPES.BREAK] = () => `break;\n`;
+
   // ========================================================================
   // 🧠 DECISIONS
   // ========================================================================
@@ -182,6 +206,18 @@ export function initBeetleBotGenerator(): void {
     const delta = generator.valueToCode(block, "DELTA", Order.NONE) || "1";
     const safeName = varName.replace(/[^a-zA-Z0-9_]/g, "_");
     return `var ${safeName} = (${safeName} || 0) + ${delta};\n`;
+  };
+
+  javascriptGenerator.forBlock[BLOCK_TYPES.VARIABLE_INCREMENT] = (block) => {
+    const varName = block.getFieldValue("VAR_NAME") || "counter";
+    const safeName = varName.replace(/[^a-zA-Z0-9_]/g, "_");
+    return `var ${safeName} = (${safeName} || 0) + 1;\n`;
+  };
+
+  javascriptGenerator.forBlock[BLOCK_TYPES.VARIABLE_DECREMENT] = (block) => {
+    const varName = block.getFieldValue("VAR_NAME") || "counter";
+    const safeName = varName.replace(/[^a-zA-Z0-9_]/g, "_");
+    return `var ${safeName} = (${safeName} || 0) - 1;\n`;
   };
 }
 

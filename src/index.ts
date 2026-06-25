@@ -96,6 +96,9 @@ function getToolbox(): Blockly.utils.toolbox.ToolboxDefinition {
         contents: [
           { kind: "block", type: "repeat" },
           { kind: "block", type: "while" },
+          { kind: "block", type: "repeat_until" },
+          { kind: "block", type: "count_with" },
+          { kind: "block", type: "break_loop" },
         ],
       },
 
@@ -130,19 +133,6 @@ function getToolbox(): Blockly.utils.toolbox.ToolboxDefinition {
       },
 
       // ========================================================================
-      // 🔢 MATH (Green - Built-in)
-      // ========================================================================
-      {
-        kind: "category",
-        name: "🔢 Math",
-        colour: "#4caf50",
-        contents: [
-          { kind: "block", type: "math_number" },
-          { kind: "block", type: "math_arithmetic" },
-        ],
-      },
-
-      // ========================================================================
       // 📡 SENSORS (Cyan - Empty placeholder)
       // ========================================================================
       {
@@ -162,9 +152,12 @@ function getToolbox(): Blockly.utils.toolbox.ToolboxDefinition {
         name: "🔢 Variables",
         colour: COLOUR_VARIABLES,
         contents: [
+          { kind: "block", type: "math_number" },
           { kind: "block", type: "variable_set" },
           { kind: "block", type: "variable_get" },
           { kind: "block", type: "variable_change" },
+          { kind: "block", type: "variable_increment" },
+          { kind: "block", type: "variable_decrement" },
         ],
       },
     ],
