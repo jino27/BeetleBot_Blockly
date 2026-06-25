@@ -179,7 +179,7 @@ document.addEventListener("DOMContentLoaded", () => {
   workspace = Blockly.inject("blocklyDiv", {
     toolbox: getToolbox(),
     theme: "dark",
-    grid: { spacing: 20, length: 3, colour: "#333", snap: true },
+    grid: { spacing: 24, length: 0, colour: "transparent", snap: true },
     zoom: {
       controls: true,
       wheel: true,
