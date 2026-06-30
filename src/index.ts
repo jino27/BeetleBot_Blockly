@@ -143,14 +143,17 @@ function getToolbox(): Blockly.utils.toolbox.ToolboxDefinition {
       },
 
       // ========================================================================
-      // 📡 SENSORS (Cyan - Empty placeholder)
+      // 📡 SENSORS (Cyan)
       // ========================================================================
       {
         kind: "category",
         name: "📡 Sensors",
         colour: COLOUR_SENSORS,
         contents: [
-          // TODO: Add sensor blocks later
+          { kind: "block", type: "read_distance" },
+          { kind: "block", type: "distance_threshold" },
+          { kind: "block", type: "tof_trigger_claw" },
+          { kind: "block", type: "wait_for_object" },
         ],
       },
 

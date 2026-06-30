@@ -51,6 +51,14 @@ export class CommandExecutor {
         await this.wifi.sendCommand(sign);
         break;
       }
+      case 'TOF_TRIGGER':
+        await this.wifi.sendCommand(`TOF_TRIGGER:${item.val}`);
+        break;
+      case 'DIST':
+      case 'DIST_THRESHOLD':
+        // These are handled by the generated code's async functions directly
+        // No queue action needed - the generated code calls sendCommand directly
+        break;
       default:
         await this.wifi.sendCommand(item.cmd);
         await this.sleep(50, signal);
