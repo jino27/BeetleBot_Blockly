@@ -183,13 +183,69 @@ export function initBeetleBotGenerator(): void {
     const safeName = varName.replace(/[^a-zA-Z0-9_]/g, "_");
     return `var ${safeName} = (${safeName} || 0) + ${delta};\n`;
   };
+
+  // ========================================================================
+  // 📡 SENSORS (TOF)
+  // ========================================================================
+  javascriptGenerator.forBlock[BLOCK_TYPES.READ_DISTANCE] = () => [
+    `await getDistance()`,
+    Order.FUNCTION_CALL,
+  ];
+
+  javascriptGenerator.forBlock[BLOCK_TYPES.DISTANCE_THRESHOLD] = (
+    block,
+    generator,
+  ) => {
+    const threshold =
+      generator.valueToCode(block, "THRESHOLD", Order.NONE) || "200";
+    return [
+      `await checkDistanceThreshold(${threshold})`,
+      Order.FUNCTION_CALL,
+    ];
+  };
+
+  javascriptGenerator.forBlock[BLOCK_TYPES.TOF_TRIGGER_CLAW] = (block) => {
+    const enable = block.getFieldValue("STATE") === "ON" ? 1 : 0;
+    return `queue.push({cmd:"TOF_TRIGGER", val:${enable}});\n`;
+  };
+
+  javascriptGenerator.forBlock[BLOCK_TYPES.WAIT_FOR_OBJECT] = (
+    block,
+    generator,
+  ) => {
+    const threshold =
+      generator.valueToCode(block, "THRESHOLD", Order.NONE) || "200";
+    return `while (!(await checkDistanceThreshold(${threshold}))) { await sleep(50); }\n`;
+  };
 }
 
 export function generateCommandQueue(
   workspace: Blockly.Workspace,
 ): CommandItem[] {
   const code = javascriptGenerator.workspaceToCode(workspace);
-  const fullCode = `var queue=[];var currentSpeed=100;${code}return queue;`;
+  const preamble = `
+var queue=[];
+var currentSpeed=100;
+async function sendCommand(cmd) {
+  return new Promise(resolve => {
+    const ws = new WebSocket('ws://' + location.hostname + ':8266');
+    ws.onopen = () => ws.send(cmd);
+    ws.onmessage = e => { ws.close(); resolve(e.data); };
+    ws.onerror = () => { ws.close(); resolve(null); };
+    setTimeout(() => { ws.close(); resolve(null); }, 2000);
+  });
+}
+async function getDistance() {
+  const res = await sendCommand('DIST');
+  return res ? parseInt(res) : -1;
+}
+async function checkDistanceThreshold(threshold) {
+  const d = await getDistance();
+  return d > 0 && d < threshold;
+}
+async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+`;
+  const fullCode = `${preamble}${code}return queue;`;
 
   try {
     const fn = new Function(fullCode);
