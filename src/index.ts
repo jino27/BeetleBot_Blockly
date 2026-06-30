@@ -96,6 +96,9 @@ function getToolbox(): Blockly.utils.toolbox.ToolboxDefinition {
         contents: [
           { kind: "block", type: "repeat" },
           { kind: "block", type: "while" },
+          { kind: "block", type: "repeat_until" },
+          { kind: "block", type: "count_with" },
+          { kind: "block", type: "break_loop" },
         ],
       },
 
@@ -165,9 +168,12 @@ function getToolbox(): Blockly.utils.toolbox.ToolboxDefinition {
         name: "🔢 Variables",
         colour: COLOUR_VARIABLES,
         contents: [
+          { kind: "block", type: "math_number" },
           { kind: "block", type: "variable_set" },
           { kind: "block", type: "variable_get" },
           { kind: "block", type: "variable_change" },
+          { kind: "block", type: "variable_increment" },
+          { kind: "block", type: "variable_decrement" },
         ],
       },
     ],
@@ -182,7 +188,7 @@ document.addEventListener("DOMContentLoaded", () => {
   workspace = Blockly.inject("blocklyDiv", {
     toolbox: getToolbox(),
     theme: "dark",
-    grid: { spacing: 20, length: 3, colour: "#333", snap: true },
+    grid: { spacing: 24, length: 0, colour: "transparent", snap: true },
     zoom: {
       controls: true,
       wheel: true,
