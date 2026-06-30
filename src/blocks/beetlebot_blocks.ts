@@ -27,6 +27,9 @@ export const BLOCK_TYPES = {
   // 🔄 Loops (Green)
   REPEAT: "repeat",
   WHILE: "while",
+  REPEAT_UNTIL: "repeat_until",
+  COUNT_WITH: "count_with",
+  BREAK: "break_loop",
 
   // 🧠 Decisions (Yellow)
   IF: "beetlebot_if",
@@ -43,6 +46,8 @@ export const BLOCK_TYPES = {
   VARIABLE_SET: "variable_set",
   VARIABLE_GET: "variable_get",
   VARIABLE_CHANGE: "variable_change",
+  VARIABLE_INCREMENT: "variable_increment",
+  VARIABLE_DECREMENT: "variable_decrement",
 
   // 📡 Sensors (Cyan)
   READ_DISTANCE: "read_distance",
@@ -250,6 +255,68 @@ export function defineBeetleBotBlocks() {
       nextStatement: null,
       colour: COLOUR_LOOPS,
       tooltip: "Repeat while condition is true (with max iterations)",
+    },
+    {
+      type: BLOCK_TYPES.REPEAT_UNTIL,
+      message0: "🔄 Repeat until %1",
+      args0: [
+        {
+          type: "input_value",
+          name: "CONDITION",
+          check: "Boolean",
+        },
+      ],
+      message1: "%1",
+      args1: [
+        {
+          type: "input_statement",
+          name: "DO",
+        },
+      ],
+      previousStatement: null,
+      nextStatement: null,
+      colour: COLOUR_LOOPS,
+      tooltip: "Repeat until the condition becomes true",
+    },
+    {
+      type: BLOCK_TYPES.COUNT_WITH,
+      message0: "🔢 Count with %1 from %2 to %3",
+      args0: [
+        {
+          type: "field_input",
+          name: "VAR",
+          text: "i",
+        },
+        {
+          type: "input_value",
+          name: "FROM",
+          check: "Number",
+        },
+        {
+          type: "input_value",
+          name: "TO",
+          check: "Number",
+        },
+      ],
+      message1: "do %1",
+      args1: [
+        {
+          type: "input_statement",
+          name: "DO",
+        },
+      ],
+      previousStatement: null,
+      nextStatement: null,
+      colour: COLOUR_LOOPS,
+      tooltip: "Run the blocks inside, counting from a start number to an end number",
+    },
+    {
+      type: BLOCK_TYPES.BREAK,
+      message0: "🛑 Break loop",
+      previousStatement: null,
+      nextStatement: null,
+      colour: COLOUR_LOOPS,
+      tooltip: "Stop and exit the loop you are inside",
     },
 
     // ========================================================================
@@ -463,7 +530,37 @@ export function defineBeetleBotBlocks() {
       previousStatement: null,
       nextStatement: null,
       colour: COLOUR_VARIABLES,
-      tooltip: "Change a variable by a value (positive or negative)",
+tooltip: "Change a variable by a value (positive or negative)",
+    },
+    {
+      type: BLOCK_TYPES.VARIABLE_INCREMENT,
+      message0: "➕ Increase %1 by 1",
+      args0: [
+        {
+          type: "field_input",
+          name: "VAR_NAME",
+          text: "counter",
+        },
+      ],
+      previousStatement: null,
+      nextStatement: null,
+      colour: COLOUR_VARIABLES,
+      tooltip: "Add 1 to a variable",
+    },
+    {
+      type: BLOCK_TYPES.VARIABLE_DECREMENT,
+      message0: "➖ Decrease %1 by 1",
+      args0: [
+        {
+          type: "field_input",
+          name: "VAR_NAME",
+          text: "counter",
+        },
+      ],
+      previousStatement: null,
+      nextStatement: null,
+      colour: COLOUR_VARIABLES,
+      tooltip: "Subtract 1 from a variable",
     },
 
     // ========================================================================
