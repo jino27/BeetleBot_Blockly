@@ -6,7 +6,7 @@ import { registerFieldAngle } from "@blockly/field-angle";
 import { defineBeetleBotBlocks } from "./blocks/beetlebot_blocks";
 import {
   initBeetleBotGenerator,
-  generateCommandQueue,
+  generateCode,
   CommandItem,
 } from "./generators/beetlebot_generator";
 import { WiFiWebSocket } from "./wifi/web_socket";
@@ -187,7 +187,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   workspace = Blockly.inject("blocklyDiv", {
     toolbox: getToolbox(),
-    theme: "dark",
+    theme: Blockly.Themes.Zelos,
     grid: { spacing: 24, length: 0, colour: "transparent", snap: true },
     zoom: {
       controls: true,
@@ -199,7 +199,7 @@ document.addEventListener("DOMContentLoaded", () => {
     trashcan: true,
   });
 
-  const savedIp = localStorage.getItem("esp32-ip") || "192.168.1.100";
+  const savedIp = localStorage.getItem("esp32-ip") || "192.168.4.1";
   (document.getElementById("esp-ip") as HTMLInputElement).value = savedIp;
 
   wifi = new WiFiWebSocket(savedIp);
@@ -290,8 +290,14 @@ async function send(cmd: string): Promise<void> {
 }
 
 async function runProgram(): Promise<void> {
-  const queue = generateCommandQueue(workspace);
-  if (!queue.length) {
+  const topBlocks = workspace.getTopBlocks(false);
+  if (!topBlocks.length) {
+    log("No blocks", "error");
+    return;
+  }
+
+  const code = generateCode(workspace);
+  if (!code.trim()) {
     log("No blocks", "error");
     return;
   }
@@ -301,7 +307,7 @@ async function runProgram(): Promise<void> {
   btn.disabled = true;
 
   try {
-    await executor.execute(queue);
+    await executor.runCode(code);
     log("Done", "sent");
   } catch (err: any) {
     log(err.message, "error");

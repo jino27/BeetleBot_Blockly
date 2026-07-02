@@ -575,8 +575,20 @@ tooltip: "Change a variable by a value (positive or negative)",
     },
     {
       type: BLOCK_TYPES.DISTANCE_THRESHOLD,
-      message0: "📏 Distance < %1 mm?",
+      message0: "📏 Distance %1 %2 mm",
       args0: [
+        {
+          type: "field_dropdown",
+          name: "OP",
+          options: [
+            ["<", "LT"],
+            ["≤", "LTE"],
+            [">", "GT"],
+            ["≥", "GTE"],
+            ["=", "EQ"],
+            ["≠", "NEQ"],
+          ],
+        },
         {
           type: "input_value",
           name: "THRESHOLD",
@@ -585,7 +597,7 @@ tooltip: "Change a variable by a value (positive or negative)",
       ],
       output: "Boolean",
       colour: COLOUR_SENSORS,
-      tooltip: "True if object detected within threshold distance",
+      tooltip: "Compare TOF distance to threshold",
     },
     {
       type: BLOCK_TYPES.TOF_TRIGGER_CLAW,

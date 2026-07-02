@@ -6,7 +6,7 @@ export class WiFiWebSocket {
   private msgId = 0;
   private pending = new Map<number, (data: string) => void>();
 
-  constructor(espIp: string = "192.168.1.100") {
+  constructor(espIp: string = "192.168.4.1") {
     this.espIp = espIp;
   }
 
@@ -85,5 +85,33 @@ export class WiFiWebSocket {
 
   onData(callback: (data: string) => void): void {
     this.onDataCallback = callback;
+  }
+
+  // Send raw command and wait for response using existing connection (for sensor reads during queue generation)
+  async sendRawCommandWithResponse(cmd: string, timeoutMs = 2000): Promise<string | null> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error("Not connected");
+    }
+    return new Promise((resolve) => {
+      let resolved = false;
+      const timeout = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          this.onDataCallback = null;
+          resolve(null);
+        }
+      }, timeoutMs);
+
+      const originalCallback = this.onDataCallback;
+      this.onDataCallback = (data: string) => {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timeout);
+          this.onDataCallback = originalCallback;
+          resolve(data.trim());
+        }
+      };
+      this.ws!.send(cmd);
+    });
   }
 }

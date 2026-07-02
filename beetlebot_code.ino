@@ -7,13 +7,12 @@
 #include <WiFi.h>
 #include <WebSocketsServer.h>
 #include <ArduinoOTA.h>
-#include <Preferences.h>
 #include <Wire.h>
 #include <VL53L0X.h>
 
-// ============== WIFI CONFIG ==============
-const char* DEFAULT_SSID = "jarvs";
-const char* DEFAULT_PASS = "12345678";
+// ============== AP CONFIG ==============
+const char* AP_SSID = "BeetleBot";
+const char* AP_PASS = "12345678";
 
 // ============== PINS ==============
 #define STBY_PIN  17
@@ -424,24 +423,6 @@ RobotContext* robot = nullptr;
 WebSocketsServer webSocket = WebSocketsServer(8266);
 CommandQueue cmdQueue;
 uint8_t activeClient = 255;
-Preferences prefs;
-
-// ============== WIFI CREDENTIALS ==============
-void loadWiFiCredentials(String& ssid, String& password) {
-    prefs.begin("beetlebot", true);
-    ssid = prefs.getString("ssid", DEFAULT_SSID);
-    password = prefs.getString("pass", DEFAULT_PASS);
-    prefs.end();
-    Serial.println("[WIFI] Loaded credentials: " + ssid);
-}
-
-void saveWiFiCredentials(const String& ssid, const String& password) {
-    prefs.begin("beetlebot", false);
-    prefs.putString("ssid", ssid);
-    prefs.putString("pass", password);
-    prefs.end();
-    Serial.println("[WIFI] Saved credentials: " + ssid);
-}
 
 // ============== COMMAND HANDLER ==============
 String handleCommand(String cmd) {
@@ -535,17 +516,6 @@ String handleCommand(String cmd) {
     cmdQueue.enqueue("CLAWTEST");
     return "QUEUED:CLAWTEST";
   }
-  else if (cmd.startsWith("WIFI:")) {
-    int firstColon = cmd.indexOf(':');
-    int secondColon = cmd.indexOf(':', firstColon + 1);
-    if (firstColon != -1 && secondColon != -1) {
-      String newSsid = cmd.substring(firstColon + 1, secondColon);
-      String newPass = cmd.substring(secondColon + 1);
-      saveWiFiCredentials(newSsid, newPass);
-      return "WIFI:SAVED:" + newSsid;
-    }
-    return "WIFI:ERROR:BAD_FORMAT";
-  }
   else if (cmd == "CLEAR") {
     cmdQueue.clear();
     robot->getMotors().stop();
@@ -604,45 +574,11 @@ void setup() {
     robot = new RobotContext();
     robot->begin();  // Initialize servo with boot test sweep
 
-    String ssid, password;
-    loadWiFiCredentials(ssid, password);
-
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid.c_str(), password.c_str());
-
-    Serial.print("Connecting to: ");
-    Serial.println(ssid);
-
-    int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 40) {
-        delay(500);
-        Serial.print(".");
-        if (++attempts % 5 == 0) {
-            Serial.println();
-            Serial.print("Status: ");
-            switch(WiFi.status()) {
-                case WL_IDLE_STATUS:     Serial.println("IDLE"); break;
-                case WL_NO_SSID_AVAIL:   Serial.println("NO_SSID"); break;
-                case WL_SCAN_COMPLETED:  Serial.println("SCAN_DONE"); break;
-                case WL_CONNECT_FAILED:  Serial.println("CONNECT_FAILED"); break;
-                case WL_CONNECTION_LOST: Serial.println("CONN_LOST"); break;
-                case WL_DISCONNECTED:    Serial.println("DISCONNECTED"); break;
-                default:                 Serial.println(WiFi.status()); break;
-            }
-        }
-    }
-
-    if (WiFi.status() == WL_CONNECTED) {
-        Serial.println("\n✓ WiFi Connected!");
-        Serial.print("IP: ");
-        Serial.println(WiFi.localIP());
-    } else {
-        Serial.println("\n✗ WiFi Failed! Starting AP mode...");
-        WiFi.mode(WIFI_AP);
-        WiFi.softAP("BeetleBot", "12345678");
-        Serial.print("AP IP: ");
-        Serial.println(WiFi.softAPIP());
-    }
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(AP_SSID, AP_PASS);
+    Serial.println("✓ AP Mode Started!");
+    Serial.print("AP IP: ");
+    Serial.println(WiFi.softAPIP());
 
     ArduinoOTA.setHostname("beetlebot");
     ArduinoOTA.onStart([]() {
