@@ -6,6 +6,7 @@ export interface CommandItem {
   cmd: string;
   val?: number;
   ms?: number;
+  params?: Record<string, unknown>;
 }
 
 export function initBeetleBotGenerator(): void {
@@ -13,23 +14,23 @@ export function initBeetleBotGenerator(): void {
   // 🚗 MOVEMENT
   // ========================================================================
   javascriptGenerator.forBlock[BLOCK_TYPES.GO_FORWARD] = () =>
-    `queue.push({cmd:"F"});\n`;
+    `queue.push({cmd:"move",params:{direction:"forward"}});\n`;
 
   javascriptGenerator.forBlock[BLOCK_TYPES.GO_BACKWARD] = () =>
-    `queue.push({cmd:"B"});\n`;
+    `queue.push({cmd:"move",params:{direction:"backward"}});\n`;
 
   javascriptGenerator.forBlock[BLOCK_TYPES.TURN_LEFT] = () =>
-    `queue.push({cmd:"TURN:L:90"});\n`;
+    `queue.push({cmd:"turn",params:{direction:"left",degrees:90}});\n`;
 
   javascriptGenerator.forBlock[BLOCK_TYPES.TURN_RIGHT] = () =>
-    `queue.push({cmd:"TURN:R:90"});\n`;
+    `queue.push({cmd:"turn",params:{direction:"right",degrees:90}});\n`;
 
   javascriptGenerator.forBlock[BLOCK_TYPES.TURN_LEFT_ANGLE] = (block) => {
     const angle = Math.max(
       1,
       Math.min(360, Math.round(Number(block.getFieldValue("ANGLE") || 90))),
     );
-    return `queue.push({cmd:"TURN:L:${angle}"});\n`;
+    return `queue.push({cmd:"turn",params:{direction:"left",degrees:${angle}}});\n`;
   };
 
   javascriptGenerator.forBlock[BLOCK_TYPES.TURN_RIGHT_ANGLE] = (block) => {
@@ -37,20 +38,20 @@ export function initBeetleBotGenerator(): void {
       1,
       Math.min(360, Math.round(Number(block.getFieldValue("ANGLE") || 90))),
     );
-    return `queue.push({cmd:"TURN:R:${angle}"});\n`;
+    return `queue.push({cmd:"turn",params:{direction:"right",degrees:${angle}}});\n`;
   };
 
   javascriptGenerator.forBlock[BLOCK_TYPES.STOP] = () =>
-    `queue.push({cmd:"S"});\n`;
+    `queue.push({cmd:"stop"});\n`;
 
   // ========================================================================
   // 🤖 ACTIONS
   // ========================================================================
   javascriptGenerator.forBlock[BLOCK_TYPES.GRAB] = () =>
-    `queue.push({cmd:"C"});\n`;
+    `queue.push({cmd:"grab"});\n`;
 
   javascriptGenerator.forBlock[BLOCK_TYPES.RELEASE] = () =>
-    `queue.push({cmd:"O"});\n`;
+    `queue.push({cmd:"release"});\n`;
 
   // ========================================================================
   // ⏱️ TIME
@@ -80,20 +81,34 @@ export function initBeetleBotGenerator(): void {
   };
 
   javascriptGenerator.forBlock[BLOCK_TYPES.WHILE] = (block, generator) => {
+    const condBlock = block.getInputTargetBlock("CONDITION");
+    if (condBlock && condBlock.type === BLOCK_TYPES.DISTANCE_THRESHOLD) {
+      const op = condBlock.getFieldValue("OP") || "LT";
+      const threshold = generator.valueToCode(condBlock, "THRESHOLD", Order.NONE) || "200";
+      const branch = generator.statementToCode(block, "DO");
+      return `queue.push({cmd:"_WHILE",threshold:${threshold},op:"${op}"});\n${branch}queue.push({cmd:"_ENDWHILE"});\n`;
+    }
     const condition =
       generator.valueToCode(block, "CONDITION", Order.NONE) || "false";
     const branch = generator.statementToCode(block, "DO");
-    return `while (${condition}) {\n${branch}}\n`;
+    return `for (var _i=0; _i<100 && (${condition}); _i++) {\n${branch}}\n`;
   };
 
   javascriptGenerator.forBlock[BLOCK_TYPES.REPEAT_UNTIL] = (
     block,
     generator,
   ) => {
+    const condBlock = block.getInputTargetBlock("CONDITION");
+    if (condBlock && condBlock.type === BLOCK_TYPES.DISTANCE_THRESHOLD) {
+      const op = condBlock.getFieldValue("OP") || "LT";
+      const threshold = generator.valueToCode(condBlock, "THRESHOLD", Order.NONE) || "200";
+      const branch = generator.statementToCode(block, "DO");
+      return `queue.push({cmd:"_WHILE",threshold:${threshold},op:"${op}",until:true});\n${branch}queue.push({cmd:"_ENDWHILE"});\n`;
+    }
     const condition =
       generator.valueToCode(block, "CONDITION", Order.NONE) || "false";
     const branch = generator.statementToCode(block, "DO");
-    return `while (!(${condition})) {\n${branch}}\n`;
+    return `for (var _i=0; _i<100 && !(${condition}); _i++) {\n${branch}}\n`;
   };
 
   javascriptGenerator.forBlock[BLOCK_TYPES.COUNT_WITH] = (
@@ -136,7 +151,6 @@ export function initBeetleBotGenerator(): void {
     const left = generator.valueToCode(block, "A", Order.NONE);
     const right = generator.valueToCode(block, "B", Order.NONE);
 
-    // If either input is empty, default to false to prevent infinite while loops
     if (!left || !right) {
       return ["false", Order.ATOMIC];
     }
@@ -187,7 +201,6 @@ export function initBeetleBotGenerator(): void {
   ) => {
     const varName = block.getFieldValue("VAR_NAME") || "counter";
     const value = generator.valueToCode(block, "VALUE", Order.NONE) || "0";
-    // Sanitize variable name for JS
     const safeName = varName.replace(/[^a-zA-Z0-9_]/g, "_");
     return `var ${safeName} = ${value};\n`;
   };
@@ -232,17 +245,13 @@ javascriptGenerator.forBlock[BLOCK_TYPES.VARIABLE_CHANGE] = (
     block,
     generator,
   ) => {
+    const op = block.getFieldValue("OP") || "LT";
     const threshold =
       generator.valueToCode(block, "THRESHOLD", Order.NONE) || "200";
     return [
-      `await checkDistanceThreshold(${threshold})`,
+      `await checkDistanceThreshold(${threshold}, "${op}")`,
       Order.FUNCTION_CALL,
     ];
-  };
-
-  javascriptGenerator.forBlock[BLOCK_TYPES.TOF_TRIGGER_CLAW] = (block) => {
-    const enable = block.getFieldValue("STATE") === "ON" ? 1 : 0;
-    return `queue.push({cmd:"TOF_TRIGGER", val:${enable}});\n`;
   };
 
   javascriptGenerator.forBlock[BLOCK_TYPES.WAIT_FOR_OBJECT] = (
@@ -251,41 +260,60 @@ javascriptGenerator.forBlock[BLOCK_TYPES.VARIABLE_CHANGE] = (
   ) => {
     const threshold =
       generator.valueToCode(block, "THRESHOLD", Order.NONE) || "200";
-    return `while (!(await checkDistanceThreshold(${threshold}))) { await sleep(50); }\n`;
+    return `for (var _i=0; _i<100 && !(await checkDistanceThreshold(${threshold}, "LT")); _i++) { await sleep(50); }\n`;
   };
 }
 
-export function generateCommandQueue(
-  workspace: Blockly.Workspace,
-): CommandItem[] {
-  const code = javascriptGenerator.workspaceToCode(workspace);
-  const preamble = `
+const PREAMBLE = `
 var queue=[];
 var currentSpeed=100;
 async function sendCommand(cmd) {
-  return new Promise(resolve => {
-    const ws = new WebSocket('ws://' + location.hostname + ':8266');
-    ws.onopen = () => ws.send(cmd);
-    ws.onmessage = e => { ws.close(); resolve(e.data); };
-    ws.onerror = () => { ws.close(); resolve(null); };
-    setTimeout(() => { ws.close(); resolve(null); }, 2000);
-  });
+  const res = await wifi.sendCommandWithResponse(cmd);
+  return res;
 }
 async function getDistance() {
-  const res = await sendCommand('DIST');
-  return res ? parseInt(res) : -1;
+  // Use cached distance from ESP32 broadcast (updated every ~150ms)
+  return wifi.getLatestDistance();
 }
-async function checkDistanceThreshold(threshold) {
+async function checkDistanceThreshold(threshold, op) {
   const d = await getDistance();
-  return d > 0 && d < threshold;
+  if (d < 0) return false;
+  switch(op) {
+    case "LT":  return d < threshold;
+    case "LTE": return d <= threshold;
+    case "GT":  return d > threshold;
+    case "GTE": return d >= threshold;
+    case "EQ":  return d === threshold;
+    case "NEQ": return d !== threshold;
+    default:    return d < threshold;
+  }
 }
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 `;
-  const fullCode = `${preamble}${code}return queue;`;
 
+export function generateCode(workspace: Blockly.Workspace): string {
+  return javascriptGenerator.workspaceToCode(workspace);
+}
+
+export function buildProgram(
+  code: string,
+  wifi: { sendCommandWithResponse(cmd: object, timeoutMs?: number): Promise<any | null> },
+): () => Promise<CommandItem[]> {
+  const fullCode = `${PREAMBLE}return (async () => { ${code}return queue; })();`;
+  const fn = new Function('wifi', fullCode);
+  return () => fn(wifi);
+}
+
+export async function generateCommandQueue(
+  workspace: Blockly.Workspace,
+  wifi?: { sendCommandWithResponse(cmd: object, timeoutMs?: number): Promise<any | null> },
+): Promise<CommandItem[]> {
+  const code = generateCode(workspace);
+  if (!code.trim()) return [];
+
+  const run = buildProgram(code, wifi ?? { sendCommandWithResponse: async () => null });
   try {
-    const fn = new Function(fullCode);
-    const result = fn();
+    const result = await run();
     return Array.isArray(result) ? result : [];
   } catch (e) {
     console.error("Code gen error:", e);

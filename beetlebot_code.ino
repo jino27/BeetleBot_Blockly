@@ -1,19 +1,20 @@
 /**
  * BeetleBot ESP32-WROOM-32E
  * WebSocket control + OTA updates + Timed Command Queue + WiFi Config
- * PWA-compatible + TOF Sensor
+ * JSON command protocol via WebSocket
  */
 
 #include <WiFi.h>
 #include <WebSocketsServer.h>
 #include <ArduinoOTA.h>
-#include <Preferences.h>
+// Wire + VL53L0X for TOF distance broadcast
 #include <Wire.h>
 #include <VL53L0X.h>
+#include <ArduinoJson.h>
 
-// ============== WIFI CONFIG ==============
-const char* DEFAULT_SSID = "jarvs";
-const char* DEFAULT_PASS = "12345678";
+// ============== AP CONFIG ==============
+const char* AP_SSID = "BeetleBot";
+const char* AP_PASS = "12345678";
 
 // ============== PINS ==============
 #define STBY_PIN  17
@@ -28,14 +29,14 @@ const char* DEFAULT_PASS = "12345678";
 #define TOF_SDA   18
 #define TOF_SCL   5
 
+// ============== TOF CONFIG ==============
+#define TOF_DETECT_DISTANCE  200  // mm - trigger distance (unused, kept for reference)
+
 // ============== SERVO CONFIG ==============
 #define SERVO_FREQ  50
 #define SERVO_RES   16
 #define OPEN_US     1500
 #define CLOSE_US    500
-
-// ============== TOF CONFIG ==============
-#define TOF_DETECT_DISTANCE  200  // mm - trigger distance
 
 // ============== MOTOR CONTROLLER ==============
 class MotorController {
@@ -209,8 +210,6 @@ private:
     ClawController claw;
     TOFSensor tof;
     int currentSpeed;
-    bool tofTriggered;  // Flag to prevent repeated triggers
-    bool tofAutoTriggerEnabled;  // Enable/disable auto-trigger
     
     static const int SPEED_DEFAULT = 100;
     static const int SPEED_MIN = 60;
@@ -218,28 +217,19 @@ private:
     static const int SPEED_STEP = 20;
 
 public:
-    RobotContext() : currentSpeed(SPEED_DEFAULT), tofTriggered(false), tofAutoTriggerEnabled(false) {
+    RobotContext() : currentSpeed(SPEED_DEFAULT) {
         pinMode(LED_PIN, OUTPUT);
         digitalWrite(LED_PIN, LOW);
     }
 
     void begin() {
-        // 1. Initialize claw first (boot test)
+        // Initialize claw first (boot test)
         claw.begin();
         delay(500);
 
-        // 2. Initialize TOF sensor
+        // Initialize TOF sensor
         bool tofOk = tof.begin();
         delay(500);
-
-        // 3. If TOF detected, run claw test 5 times
-        if (tofOk) {
-            Serial.println("\n=== TOF Detected! Running Claw Test (5x) ===");
-            claw.testCycle(5);
-            Serial.println("=== Claw Test Complete ===\n");
-        } else {
-            Serial.println("\n=== TOF Not Found - Skipping Claw Test ===\n");
-        }
     }
 
     MotorController& getMotors() { return motors; }
@@ -254,27 +244,6 @@ public:
     void decreaseSpeed() { setSpeed(currentSpeed - SPEED_STEP); }
 
     void setLED(bool on) { digitalWrite(LED_PIN, on ? HIGH : LOW); }
-
-    // Check TOF and trigger action if object detected
-    void checkTOFTrigger() {
-        if (!tof.isReady() || !tofAutoTriggerEnabled) return;
-        
-        int dist = tof.readDistance();
-        if (dist > 0 && dist < TOF_DETECT_DISTANCE && !tofTriggered) {
-            Serial.println("[TOF] Object detected at " + String(dist) + "mm! Triggering claw...");
-            tofTriggered = true;
-            claw.testCycle(5);  // Close/open 5 times
-        }
-        else if (dist > TOF_DETECT_DISTANCE || dist < 0) {
-            tofTriggered = false;  // Reset when object moves away
-        }
-    }
-    
-    void setTOFAutoTrigger(bool enable) {
-        tofAutoTriggerEnabled = enable;
-        if (!enable) tofTriggered = false;
-        Serial.println("[TOF] Auto-trigger " + String(enable ? "ENABLED" : "DISABLED"));
-    }
 };
 
 // ============== COMMAND QUEUE ==============
@@ -332,7 +301,12 @@ public:
                 }
                 isRunning = false;
                 if (ws && clientNum != 255) {
-                    ws->sendTXT(clientNum, "DONE:" + currentAction);
+                    String json;
+                    StaticJsonDocument<96> d;
+                    d["status"] = "done";
+                    d["action"] = currentAction;
+                    serializeJson(d, json);
+                    ws->sendTXT(clientNum, json);
                 }
             }
             return;
@@ -355,7 +329,12 @@ public:
             executeCommand(robot, cmd);
 
             if (ws && clientNum != 255) {
-                ws->sendTXT(clientNum, "EXEC:" + currentAction);
+                String json;
+                StaticJsonDocument<96> d;
+                d["status"] = "exec";
+                d["action"] = currentAction;
+                serializeJson(d, json);
+                ws->sendTXT(clientNum, json);
             }
         }
     }
@@ -424,142 +403,191 @@ RobotContext* robot = nullptr;
 WebSocketsServer webSocket = WebSocketsServer(8266);
 CommandQueue cmdQueue;
 uint8_t activeClient = 255;
-Preferences prefs;
 
-// ============== WIFI CREDENTIALS ==============
-void loadWiFiCredentials(String& ssid, String& password) {
-    prefs.begin("beetlebot", true);
-    ssid = prefs.getString("ssid", DEFAULT_SSID);
-    password = prefs.getString("pass", DEFAULT_PASS);
-    prefs.end();
-    Serial.println("[WIFI] Loaded credentials: " + ssid);
+// ============== JSON HELPERS ==============
+String buildJsonResponse(const char* status, const char* action) {
+  StaticJsonDocument<128> doc;
+  doc["status"] = status;
+  doc["cmd"] = action;
+  String out;
+  serializeJson(doc, out);
+  return out;
 }
 
-void saveWiFiCredentials(const String& ssid, const String& password) {
-    prefs.begin("beetlebot", false);
-    prefs.putString("ssid", ssid);
-    prefs.putString("pass", password);
-    prefs.end();
-    Serial.println("[WIFI] Saved credentials: " + ssid);
+String buildStatusJson() {
+  StaticJsonDocument<128> doc;
+  doc["status"] = "ok";
+  doc["action"] = "status";
+  doc["speed"] = robot->getSpeed();
+  doc["queue"] = cmdQueue.isEmpty() ? "empty" : "busy";
+  doc["claw"] = robot->getClaw().isAttached() ? "ok" : "err";
+  String out;
+  serializeJson(doc, out);
+  return out;
 }
 
 // ============== COMMAND HANDLER ==============
-String handleCommand(String cmd) {
-  cmd.toUpperCase();
+// Accepts JSON: {"cmd":"move","params":{"direction":"forward","speed":100,"duration":2000}}
+// Returns JSON: {"status":"queued","cmd":"move"}
+// Legacy plain-string commands are rejected with {"status":"rejected","reason":"use JSON protocol"}
+String handleCommand(String raw) {
+  // Quick check for known legacy plain-text commands — reject immediately
+  String upper;
+  for (size_t i = 0; i < raw.length(); i++) upper += (char)toupper(raw[i]);
+  upper.trim();
 
-  auto enqueueTurn = [&](char direction, int degrees) -> String {
-    if (direction == 'L') {
-      cmdQueue.enqueue("L", degrees);
-      return "QUEUED:TURN_LEFT:" + String(degrees);
-    }
-    cmdQueue.enqueue("R", degrees);
-    return "QUEUED:TURN_RIGHT:" + String(degrees);
-  };
-
-  // New TOF commands (respond immediately with data)
-  if (cmd == "DIST") {
-    int dist = robot->getTOF().readDistance();
-    return "DIST:" + String(dist);
-  }
-  else if (cmd.startsWith("DIST_THRESHOLD:")) {
-    int thresh = cmd.substring(15).toInt();
-    int dist = robot->getTOF().readDistance();
-    bool result = (dist > 0 && dist < thresh);
-    return "BOOL:" + String(result);
-  }
-  else if (cmd.startsWith("TOF_TRIGGER:")) {
-    int enable = cmd.substring(12).toInt();
-    robot->setTOFAutoTrigger(enable);
-    return "TOF_TRIGGER:OK";
-  }
-  else if (cmd.startsWith("TURN:")) {
-    int firstColon = cmd.indexOf(':');
-    int secondColon = cmd.indexOf(':', firstColon + 1);
-    if (firstColon != -1 && secondColon != -1) {
-      String dir = cmd.substring(firstColon + 1, secondColon);
-      int degrees = cmd.substring(secondColon + 1).toInt();
-      if (dir == "L" || dir == "LEFT") {
-        return enqueueTurn('L', degrees);
-      }
-      if (dir == "R" || dir == "RIGHT") {
-        return enqueueTurn('R', degrees);
-      }
-    }
-    return "TURN:ERROR:BAD_FORMAT";
+  if (upper == "F" || upper == "B" || upper == "L" || upper == "R" ||
+      upper == "S" || upper == "/" || upper == "BRAKE" || upper == "CLAWTEST" ||
+      upper == "+" || upper == "-" || upper == "FORWARD" || upper == "BACKWARD" ||
+      upper == "LEFT" || upper == "RIGHT" || upper == "STOP" || upper == "OPEN" ||
+      upper == "CLOSE" || upper.startsWith("DIST") ||
+      upper.startsWith("TOF_TRIGGER:") || upper.startsWith("DIST_THRESHOLD:")) {
+    StaticJsonDocument<96> reject;
+    reject["status"] = "rejected";
+    reject["reason"] = "legacy protocol deprecated, use JSON";
+    String out;
+    serializeJson(reject, out);
+    return out;
   }
 
-  if (cmd == "F" || cmd == "FORWARD") {
-    cmdQueue.enqueue("F");
-    return "QUEUED:FORWARD";
-  }
-  else if (cmd == "B" || cmd == "BACKWARD") {
-    cmdQueue.enqueue("B");
-    return "QUEUED:BACKWARD";
-  }
-  else if (cmd == "L" || cmd == "LEFT") {
-    return enqueueTurn('L', 90);
-  }
-  else if (cmd == "R" || cmd == "RIGHT") {
-    return enqueueTurn('R', 90);
-  }
-  else if (cmd == "S" || cmd == "STOP" || cmd == "/") {
-    cmdQueue.enqueue("S");
-    return "QUEUED:STOP";
-  }
-  else if (cmd == "BRAKE") {
-    cmdQueue.enqueue("BRAKE");
-    return "QUEUED:BRAKE";
-  }
-  else if (cmd == "O" || cmd == "OPEN") {
-    cmdQueue.enqueue("O");
-    return "QUEUED:OPEN";
-  }
-  else if (cmd == "C" || cmd == "CLOSE") {
-    cmdQueue.enqueue("C");
-    return "QUEUED:CLOSE";
-  }
-  else if (cmd == "+") {
-    cmdQueue.enqueue("+");
-    return "QUEUED:SPEED+";
-  }
-  else if (cmd == "-") {
-    cmdQueue.enqueue("-");
-    return "QUEUED:SPEED-";
-  }
-  else if (cmd.startsWith("SPEED:")) {
-    int spd = cmd.substring(6).toInt();
-    cmdQueue.enqueue("SPEED:", spd);
-    return "QUEUED:SPEED:" + String(spd);
-  }
-  else if (cmd == "CLAWTEST") {
-    cmdQueue.enqueue("CLAWTEST");
-    return "QUEUED:CLAWTEST";
-  }
-  else if (cmd.startsWith("WIFI:")) {
-    int firstColon = cmd.indexOf(':');
-    int secondColon = cmd.indexOf(':', firstColon + 1);
-    if (firstColon != -1 && secondColon != -1) {
-      String newSsid = cmd.substring(firstColon + 1, secondColon);
-      String newPass = cmd.substring(secondColon + 1);
-      saveWiFiCredentials(newSsid, newPass);
-      return "WIFI:SAVED:" + newSsid;
-    }
-    return "WIFI:ERROR:BAD_FORMAT";
-  }
-  else if (cmd == "CLEAR") {
+  // Legacy CLEAR and STATUS are still allowed for backward compat
+  if (upper == "CLEAR") {
     cmdQueue.clear();
     robot->getMotors().stop();
-    return "QUEUE:CLEARED";
+    return buildJsonResponse("ok", "clear");
   }
-  else if (cmd == "STATUS") {
-    String status = "SPEED:" + String(robot->getSpeed());
-    status += " QUEUE:" + String(cmdQueue.isEmpty() ? "EMPTY" : "BUSY");
-    status += " CLAW:" + String(robot->getClaw().isAttached() ? "OK" : "ERR");
-    status += " TOF:" + String(robot->getTOF().isReady() ? "OK" : "ERR");
-    return status;
+  if (upper == "STATUS") {
+    return buildStatusJson();
+  }
+  if (upper.startsWith("TURN:")) {
+    int firstColon = upper.indexOf(':');
+    int secondColon = upper.indexOf(':', firstColon + 1);
+    if (firstColon != -1 && secondColon != -1) {
+      String dir = upper.substring(firstColon + 1, secondColon);
+      int degrees = upper.substring(secondColon + 1).toInt();
+      if (dir == "L" || dir == "LEFT") {
+        cmdQueue.enqueue("L", degrees);
+        return buildJsonResponse("queued", "turn_left");
+      }
+      if (dir == "R" || dir == "RIGHT") {
+        cmdQueue.enqueue("R", degrees);
+        return buildJsonResponse("queued", "turn_right");
+      }
+    }
+    return buildJsonResponse("error", "bad_turn_format");
   }
 
-  return "UNKNOWN:" + cmd;
+  // Try JSON parse
+  StaticJsonDocument<256> doc;
+  DeserializationError err = deserializeJson(doc, raw);
+  if (err) {
+    StaticJsonDocument<64> reject;
+    reject["status"] = "error";
+    reject["msg"] = "invalid json";
+    String out;
+    serializeJson(reject, out);
+    return out;
+  }
+
+  const char* cmd = doc["cmd"];
+  if (!cmd) {
+    return buildJsonResponse("error", "missing_cmd");
+  }
+
+  JsonObject params = doc["params"];
+
+  // Map JSON commands to internal queue actions
+  if (strcmp(cmd, "move") == 0) {
+    const char* direction = params["direction"] | "forward";
+    int speed = params["speed"] | robot->getSpeed();
+    int duration = params["duration"] | CMD_DURATION;
+
+    if (speed != robot->getSpeed()) {
+      robot->setSpeed(speed);
+    }
+
+    if (strcmp(direction, "forward") == 0) {
+      cmdQueue.enqueue("F", 0, duration);
+    } else if (strcmp(direction, "backward") == 0) {
+      cmdQueue.enqueue("B", 0, duration);
+    } else {
+      return buildJsonResponse("error", "bad_direction");
+    }
+    return buildJsonResponse("queued", "move");
+  }
+
+  if (strcmp(cmd, "turn") == 0) {
+    const char* direction = params["direction"] | "left";
+    int degrees = params["degrees"] | 90;
+
+    if (strcmp(direction, "left") == 0) {
+      cmdQueue.enqueue("L", degrees);
+    } else if (strcmp(direction, "right") == 0) {
+      cmdQueue.enqueue("R", degrees);
+    } else {
+      return buildJsonResponse("error", "bad_direction");
+    }
+    return buildJsonResponse("queued", "turn");
+  }
+
+  if (strcmp(cmd, "grab") == 0) {
+    cmdQueue.enqueue("C");
+    return buildJsonResponse("queued", "grab");
+  }
+
+  if (strcmp(cmd, "release") == 0) {
+    cmdQueue.enqueue("O");
+    return buildJsonResponse("queued", "release");
+  }
+
+  if (strcmp(cmd, "speed") == 0) {
+    const char* delta = params["delta"];
+    if (delta) {
+      if (strcmp(delta, "increase") == 0) {
+        robot->increaseSpeed();
+      } else if (strcmp(delta, "decrease") == 0) {
+        robot->decreaseSpeed();
+      }
+    } else {
+      int value = params["value"] | params["speed"] | 100;
+      cmdQueue.enqueue("SPEED:", value);
+    }
+    return buildJsonResponse("queued", "speed");
+  }
+
+  if (strcmp(cmd, "stop") == 0) {
+    cmdQueue.enqueue("S");
+    return buildJsonResponse("queued", "stop");
+  }
+
+  if (strcmp(cmd, "clear") == 0) {
+    cmdQueue.clear();
+    robot->getMotors().stop();
+    return buildJsonResponse("ok", "clear");
+  }
+
+  if (strcmp(cmd, "status") == 0) {
+    return buildStatusJson();
+  }
+
+  if (strcmp(cmd, "dist") == 0) {
+    int dist = -1;
+    // Distance read temporarily disabled — will be handled by broadcast (Subtask 2)
+    StaticJsonDocument<64> res;
+    res["status"] = "ok";
+    res["distance"] = dist;
+    String out;
+    serializeJson(res, out);
+    return out;
+  }
+
+  // Unknown cmd
+  StaticJsonDocument<64> reject;
+  reject["status"] = "error";
+  reject["msg"] = "unknown cmd";
+  String out;
+  serializeJson(reject, out);
+  return out;
 }
 
 // ============== WEBSOCKET EVENTS ==============
@@ -583,7 +611,7 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
             Serial.printf("[%u] RX: %s\n", num, payload);
 
             if (strcmp((char*)payload, "OTA") == 0) {
-                webSocket.sendTXT(num, "OTA:READY");
+                webSocket.sendTXT(num, "{\"status\":\"ok\",\"msg\":\"OTA ready\"}");
                 ArduinoOTA.begin();
                 return;
             }
@@ -604,45 +632,11 @@ void setup() {
     robot = new RobotContext();
     robot->begin();  // Initialize servo with boot test sweep
 
-    String ssid, password;
-    loadWiFiCredentials(ssid, password);
-
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid.c_str(), password.c_str());
-
-    Serial.print("Connecting to: ");
-    Serial.println(ssid);
-
-    int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 40) {
-        delay(500);
-        Serial.print(".");
-        if (++attempts % 5 == 0) {
-            Serial.println();
-            Serial.print("Status: ");
-            switch(WiFi.status()) {
-                case WL_IDLE_STATUS:     Serial.println("IDLE"); break;
-                case WL_NO_SSID_AVAIL:   Serial.println("NO_SSID"); break;
-                case WL_SCAN_COMPLETED:  Serial.println("SCAN_DONE"); break;
-                case WL_CONNECT_FAILED:  Serial.println("CONNECT_FAILED"); break;
-                case WL_CONNECTION_LOST: Serial.println("CONN_LOST"); break;
-                case WL_DISCONNECTED:    Serial.println("DISCONNECTED"); break;
-                default:                 Serial.println(WiFi.status()); break;
-            }
-        }
-    }
-
-    if (WiFi.status() == WL_CONNECTED) {
-        Serial.println("\n✓ WiFi Connected!");
-        Serial.print("IP: ");
-        Serial.println(WiFi.localIP());
-    } else {
-        Serial.println("\n✗ WiFi Failed! Starting AP mode...");
-        WiFi.mode(WIFI_AP);
-        WiFi.softAP("BeetleBot", "12345678");
-        Serial.print("AP IP: ");
-        Serial.println(WiFi.softAPIP());
-    }
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(AP_SSID, AP_PASS);
+    Serial.println("✓ AP Mode Started!");
+    Serial.print("AP IP: ");
+    Serial.println(WiFi.softAPIP());
 
     ArduinoOTA.setHostname("beetlebot");
     ArduinoOTA.onStart([]() {
@@ -685,7 +679,18 @@ void loop() {
     ArduinoOTA.handle();
     webSocket.loop();
     cmdQueue.update(robot, &webSocket, activeClient);
-    
-    // Auto-trigger claw when object detected by TOF
-    robot->checkTOFTrigger();
+
+    // Broadcast TOF distance ~6-7 Hz (every ~150ms)
+    static unsigned long lastDistBroadcast = 0;
+    unsigned long now = millis();
+    if (now - lastDistBroadcast >= 150) {
+        lastDistBroadcast = now;
+        if (robot->getTOF().isReady()) {
+            int dist = robot->getTOF().readDistance();
+            if (dist >= 0) {
+                String json = "{\"event\":\"distance\",\"value\":" + String(dist) + "}";
+                webSocket.broadcastTXT(json);
+            }
+        }
+    }
 }

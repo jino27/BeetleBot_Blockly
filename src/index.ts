@@ -6,12 +6,12 @@ import { registerFieldAngle } from "@blockly/field-angle";
 import { defineBeetleBotBlocks } from "./blocks/beetlebot_blocks";
 import {
   initBeetleBotGenerator,
-  generateCommandQueue,
+  generateCode,
   CommandItem,
 } from "./generators/beetlebot_generator";
 import { WiFiWebSocket } from "./wifi/web_socket";
 import { CommandExecutor } from "./execution/command_executor";
-
+import { blocklyToBlockTree} from "./generators/block_tree_export";
 import "./styles.css";
 
 let workspace: Blockly.WorkspaceSvg;
@@ -155,7 +155,6 @@ function getToolbox(): Blockly.utils.toolbox.ToolboxDefinition {
         contents: [
           { kind: "block", type: "read_distance" },
           { kind: "block", type: "distance_threshold" },
-          { kind: "block", type: "tof_trigger_claw" },
           { kind: "block", type: "wait_for_object" },
         ],
       },
@@ -187,7 +186,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   workspace = Blockly.inject("blocklyDiv", {
     toolbox: getToolbox(),
-    theme: "dark",
+    theme: Blockly.Themes.Zelos,
     grid: { spacing: 24, length: 0, colour: "transparent", snap: true },
     zoom: {
       controls: true,
@@ -199,12 +198,18 @@ document.addEventListener("DOMContentLoaded", () => {
     trashcan: true,
   });
 
-  const savedIp = localStorage.getItem("esp32-ip") || "192.168.1.100";
+  const savedIp = localStorage.getItem("esp32-ip") || "192.168.4.1";
   (document.getElementById("esp-ip") as HTMLInputElement).value = savedIp;
 
   wifi = new WiFiWebSocket(savedIp);
+  //TEMP for Testing-----------------
   executor = new CommandExecutor(wifi);
-
+  (window as any).wifi = wifi;
+  (window as any).executor = executor;
+  (window as any).blocklyToBlockTree = blocklyToBlockTree;
+  (window as any).workspace = workspace;
+  
+  //----------------------------------
   workspace.addChangeListener(() => {
     if (!executor.isRunning) updatePreview();
   });
@@ -219,25 +224,25 @@ function setupUI(): void {
   document.getElementById("btn-save-ip")!.addEventListener("click", saveIp);
   document
     .getElementById("btn-fwd")!
-    .addEventListener("click", () => send("F"));
+    .addEventListener("click", () => send(JSON.stringify({cmd:"move",params:{direction:"forward"}})));
   document
     .getElementById("btn-bwd")!
-    .addEventListener("click", () => send("B"));
+    .addEventListener("click", () => send(JSON.stringify({cmd:"move",params:{direction:"backward"}})));
   document
     .getElementById("btn-left")!
-    .addEventListener("click", () => send("L"));
+    .addEventListener("click", () => send(JSON.stringify({cmd:"turn",params:{direction:"left",degrees:90}})));
   document
     .getElementById("btn-right")!
-    .addEventListener("click", () => send("R"));
+    .addEventListener("click", () => send(JSON.stringify({cmd:"turn",params:{direction:"right",degrees:90}})));
   document
     .getElementById("btn-stop")!
-    .addEventListener("click", () => send("S"));
+    .addEventListener("click", () => send(JSON.stringify({cmd:"stop"})));
   document
     .getElementById("btn-open")!
-    .addEventListener("click", () => send("O"));
+    .addEventListener("click", () => send(JSON.stringify({cmd:"release"})));
   document
     .getElementById("btn-close")!
-    .addEventListener("click", () => send("C"));
+    .addEventListener("click", () => send(JSON.stringify({cmd:"grab"})));
   document.getElementById("btn-run")!.addEventListener("click", runProgram);
   document
     .getElementById("btn-stop-program")!
@@ -276,22 +281,29 @@ async function toggleConnect(): Promise<void> {
   }
 }
 
-async function send(cmd: string): Promise<void> {
+async function send(jsonCmd: string): Promise<void> {
   if (!wifi.isConnected) {
     log("Not connected", "error");
     return;
   }
   try {
+    const cmd = JSON.parse(jsonCmd);
     await wifi.sendCommand(cmd);
-    log(`→ ${cmd}`, "sent");
+    log(`→ ${jsonCmd}`, "sent");
   } catch (err: any) {
     log(err.message, "error");
   }
 }
 
 async function runProgram(): Promise<void> {
-  const queue = generateCommandQueue(workspace);
-  if (!queue.length) {
+  const topBlocks = workspace.getTopBlocks(false);
+  if (!topBlocks.length) {
+    log("No blocks", "error");
+    return;
+  }
+
+  const code = generateCode(workspace);
+  if (!code.trim()) {
     log("No blocks", "error");
     return;
   }
@@ -301,7 +313,7 @@ async function runProgram(): Promise<void> {
   btn.disabled = true;
 
   try {
-    await executor.execute(queue);
+    await executor.runCode(code);
     log("Done", "sent");
   } catch (err: any) {
     log(err.message, "error");

@@ -1,162 +1,79 @@
 # Beetlebot_Blockly
 
-A visual programming education platform that uses Google Blockly to teach learners how to build logic for the BeetleBot remote-controlled car. Instead of debugging C++ syntax, students arrange blocks whose behavior translates into actual vehicle movements and sensor handling — a safer entry point into robotics.
+A visual programming editor for BeetleBot ESP32 robots. Students arrange Blockly blocks; the app generates JavaScript commands and sends them over WebSocket to control the robot in real time.
 
 ## System Overview
 
-The project is split into two halves:
+- **Frontend:** Blockly workspace where users drag and drop blocks (`src/` / `index.html`)
+- **Execution Layer:** Block generators produce JavaScript that pushes commands (`F`, `B`, `L`, `R`, etc.) to a queue, which `CommandExecutor` sends to the robot over WebSocket (`ws://<ip>:8266`)
 
-- **Frontend:** A web interface where users drag and drop Blockly blocks (`src/` / `index.html`).
-- **Generation Layer:** Block generators convert those visual graphs into C++ source code for Arduino, saved in a `.ino` file with the `#include <Servo.h>` stack — the actual firmware that runs on the ESP32 controller.
+This is not a C++ compiler — generated code runs in-browser and communicates with the ESP32 firmware over WiFi.
 
 ## Prerequisites
 
-Before you can start, make sure your system has:
-
-- **Node.js 18+** & **npm:** To build and serve the web interface
-- **Arduino IDE (Optional):** Only if you plan to upload the generated `.ino` file directly onto an actual BeetleBot car
-- **Web browser:** Chrome or Firefox are recommended for the Blockly workspace
-- **Hardware:**
-  - BeetleBot car with ESP32 controller
-  - WiFi network (robot and computer on same network)
+- **Node.js 18+** & **npm**
+- **Web browser** (Chrome or Firefox)
+- **Hardware:** BeetleBot car with ESP32, same WiFi network as your computer
 
 ## Installation
 
-### 1. Clone the Repository
-
-```bash
-git clone https://github.com/yourusername/Beetlebot_Blockly.git
-cd Beetlebot_Blockly
-```
-
-### 2. Install Dependencies
-
 ```bash
 npm install
+npm run build      # production build → dist/
+npm start          # dev server → http://127.0.0.1:8080
 ```
-
-This installs all build dependencies including:
-
-- `webpack` & `webpack-cli` — bundler
-- `blockly` — visual block editor
-- `typescript` — type-safe development
-- `ts-loader` — TypeScript compilation
-
-### 3. Build the Project
-
-```bash
-npm run build
-```
-
-Compiled assets will be output to the `/dist` directory.
-
-### 4. Start the Development Server (Optional)
-
-```bash
-npm start
-```
-
-This runs the development server at `http://localhost:8080`.
 
 ## Usage
 
-### Running the Application
+### Connect to Robot
 
-**Option A: Development Server**
+1. Power on BeetleBot
+2. Enter the robot's IP in the **Robot IP** field (default: `192.168.4.1`)
+3. Click **Connect** — status changes to "Online"
 
-```bash
-npm start
-# Open http://localhost:8080 in your browser
-```
+### Build Logic with Blocks
 
-**Option B: Production Build**
-
-```bash
-npm run build
-# Serve the /dist folder with any static server
-# e.g., npx serve dist
-```
-
-### Connecting to BeetleBot
-
-1. Power on your BeetleBot and ensure it's connected to WiFi
-2. In the web interface, enter the robot's IP address in the **Robot IP** field (default: `192.168.1.100`)
-3. Click **Connect** to establish a connection
-4. The status indicator will change to "Online" when connected
-
-### Using Blockly Blocks
-
-1. **Drag blocks** from the toolbox on the left into the workspace
-2. **Arrange logic** — for example:
-   - "If sensor detects obstacle → Stop"
-   - "Move forward for 2 seconds → Turn left"
-3. Click **GENERATE CODE** to produce the Arduino sketch
-4. The generated C++ code appears in the **Commands** panel
+Drag blocks from the toolbox into the workspace. The **Commands** panel updates live with the generated command queue. Click **▶ Run Program** to send commands to the robot.
 
 ### Quick Controls
 
-Use the D-pad for manual control:
-
 | Button | Action |
 |--------|--------|
-| ▲ | Move forward |
-| ▼ | Move backward |
+| ▲ | Forward |
+| ▼ | Backward |
 | ◀ | Turn left |
 | ▶ | Turn right |
 | ■ | Stop |
-
-### Running Programs
-
-1. Click **▶ Run Program** to execute your block logic on the robot
-2. Click **⏹ Stop** to halt execution
-3. Monitor the **Log** panel for real-time feedback from the robot's sensors
-
-### Uploading to Hardware (Optional)
-
-If you have a physical robot and want to flash the generated code:
-
-1. Click **GENERATE CODE** in the Blockly workspace
-2. Copy the generated `.ino` code
-3. Open the Arduino IDE
-4. Paste the code and upload to your ESP32 controller
 
 ## Project Structure
 
 ```
 Beetlebot_Blockly/
-├── dist/                     # Compiled assets for browser use
-├── public/                   # Static resources (images, icons)
+├── dist/                     # Compiled bundle
+├── public/                   # Static assets (icons, manifest)
 ├── src/
-│   ├── assets/               # Static assets loaded by the app
 │   ├── blocks/               # Blockly block definitions
-│   ├── execution/            # Runtime execution logic
-│   ├── generators/           # Code generators (Blockly → C++)
-│   ├── theme/                # Custom Blockly theme
-│   ├── wifi/                 # WiFi connection handling
-│   ├── index.ts              # Main entry point
+│   ├── execution/            # Command queue executor over WebSocket
+│   ├── generators/           # Block → JS generators
+│   ├── wifi/                 # WebSocket client (ws://<ip>:8266)
+│   ├── index.ts              # Entry point, workspace setup, UI
 │   └── styles.css            # Application styles
-├── index.html                # Main HTML template
-├── package.json              # NPM dependencies & scripts
-├── webpack.config.js         # Build configuration
-└── beetlebot_code.ino        # Generated Arduino sketch
+├── index.html                # HTML template
+├── package.json
+├── webpack.config.js
+├── tsconfig.json
+├── AGENTS.md                 # Agent instructions
+├── DESIGN.md                 # Ignite Dark design system
+└── beetlebot_code.ino        # ESP32 firmware (separate project artifact)
 ```
 
 ## Available Scripts
 
 | Command | Description |
 |---------|-------------|
-| `npm start` | Start development server on port 8080 |
-| `npm run build` | Build production assets to `/dist` |
+| `npm start` | Dev server on port 8080 |
+| `npm run build` | Production build to `dist/` |
 
-## Future Roadmap
+## Design
 
-[TO BE IMPROVED] — Currently a straightforward block → C++ generator. Next steps: more granular handling of stereo-vision inputs, and an interactive simulation mode before going to hardware.
-
-## Support & Feedback
-
-- **Issues:** Report bugs or request features via the GitHub issue tracker
-- **Questions:** For help with robot wiring or hardware setup, check the project documentation
-
-## License
-
-[TO BE ADDED] — Specify your license (e.g., MIT, Apache-2.0) and include a LICENSE file.
+See `DESIGN.md` — dark theme (Ignite Dark), Poppins font, 8px spacing grid, orange primary (#FF6F20). Blockly uses `Blockly.Themes.Zelos`.
