@@ -11,7 +11,7 @@ import {
 } from "./generators/beetlebot_generator";
 import { WiFiWebSocket } from "./wifi/web_socket";
 import { CommandExecutor } from "./execution/command_executor";
-
+import { blocklyToBlockTree} from "./generators/block_tree_export";
 import "./styles.css";
 
 let workspace: Blockly.WorkspaceSvg;
@@ -206,7 +206,9 @@ document.addEventListener("DOMContentLoaded", () => {
   executor = new CommandExecutor(wifi);
   (window as any).wifi = wifi;
   (window as any).executor = executor;
+  (window as any).blocklyToBlockTree = blocklyToBlockTree;
   (window as any).workspace = workspace;
+  
   //----------------------------------
   workspace.addChangeListener(() => {
     if (!executor.isRunning) updatePreview();
