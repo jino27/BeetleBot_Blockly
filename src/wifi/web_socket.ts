@@ -1,10 +1,10 @@
 export class WiFiWebSocket {
   private ws: WebSocket | null = null;
-  private onDataCallback: ((data: string) => void) | null = null;
   private connected = false;
   private espIp: string;
   private msgId = 0;
-  private pending = new Map<number, (data: string) => void>();
+  private pending = new Map<number, (data: any) => void>();
+  private latestDistance = -1;
 
   constructor(espIp: string = "192.168.4.1") {
     this.espIp = espIp;
@@ -12,6 +12,10 @@ export class WiFiWebSocket {
 
   get isConnected(): boolean {
     return this.connected;
+  }
+
+  getLatestDistance(): number {
+    return this.latestDistance;
   }
 
   setIp(ip: string): void {
@@ -30,7 +34,27 @@ export class WiFiWebSocket {
 
       this.ws.onmessage = (event) => {
         const data = event.data.toString().trim();
-        // Check for response format: "id:data"
+        try {
+          const parsed = JSON.parse(data);
+          
+          // Handle distance broadcast from ESP32
+          if (parsed.event === "distance" && typeof parsed.value === "number") {
+            this.latestDistance = parsed.value;
+            return;
+          }
+          
+          // Handle command responses with id correlation
+          if (parsed.id !== undefined && this.pending.has(parsed.id)) {
+            const resolver = this.pending.get(parsed.id)!;
+            this.pending.delete(parsed.id);
+            resolver(parsed);
+            return;
+          }
+        } catch {
+          // Not JSON, ignore or could be legacy format
+        }
+        
+        // Legacy format fallback: "id:payload"
         const colonIdx = data.indexOf(':');
         if (colonIdx > 0) {
           const id = parseInt(data.substring(0, colonIdx), 10);
@@ -42,7 +66,6 @@ export class WiFiWebSocket {
             return;
           }
         }
-        if (this.onDataCallback) this.onDataCallback(data);
       };
 
       this.ws.onerror = () => reject(new Error("Failed to connect"));
@@ -56,62 +79,31 @@ export class WiFiWebSocket {
       this.ws = null;
     }
     this.connected = false;
+    this.latestDistance = -1;
   }
 
-  async sendCommand(cmd: string): Promise<void> {
+  async sendCommand(cmd: object): Promise<void> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error("Not connected");
     }
-    this.ws.send(cmd);
+    this.ws.send(JSON.stringify(cmd));
   }
 
-  async sendCommandWithResponse(cmd: string, timeoutMs = 2000): Promise<string | null> {
+  async sendCommandWithResponse(cmd: object, timeoutMs = 2000): Promise<any | null> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error("Not connected");
     }
     return new Promise((resolve) => {
       const id = ++this.msgId;
-      const fullCmd = `${id}:${cmd}`;
+      const fullCmd = { ...cmd, id };
       this.pending.set(id, resolve);
-      this.ws!.send(fullCmd);
+      this.ws!.send(JSON.stringify(fullCmd));
       setTimeout(() => {
         if (this.pending.has(id)) {
           this.pending.delete(id);
           resolve(null);
         }
       }, timeoutMs);
-    });
-  }
-
-  onData(callback: (data: string) => void): void {
-    this.onDataCallback = callback;
-  }
-
-  // Send raw command and wait for response using existing connection (for sensor reads during queue generation)
-  async sendRawCommandWithResponse(cmd: string, timeoutMs = 2000): Promise<string | null> {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      throw new Error("Not connected");
-    }
-    return new Promise((resolve) => {
-      let resolved = false;
-      const timeout = setTimeout(() => {
-        if (!resolved) {
-          resolved = true;
-          this.onDataCallback = null;
-          resolve(null);
-        }
-      }, timeoutMs);
-
-      const originalCallback = this.onDataCallback;
-      this.onDataCallback = (data: string) => {
-        if (!resolved) {
-          resolved = true;
-          clearTimeout(timeout);
-          this.onDataCallback = originalCallback;
-          resolve(data.trim());
-        }
-      };
-      this.ws!.send(cmd);
     });
   }
 }

@@ -6,6 +6,7 @@ export interface CommandItem {
   cmd: string;
   val?: number;
   ms?: number;
+  params?: Record<string, unknown>;
 }
 
 export function initBeetleBotGenerator(): void {
@@ -13,23 +14,23 @@ export function initBeetleBotGenerator(): void {
   // 🚗 MOVEMENT
   // ========================================================================
   javascriptGenerator.forBlock[BLOCK_TYPES.GO_FORWARD] = () =>
-    `queue.push({cmd:"F"});\n`;
+    `queue.push({cmd:"move",params:{direction:"forward"}});\n`;
 
   javascriptGenerator.forBlock[BLOCK_TYPES.GO_BACKWARD] = () =>
-    `queue.push({cmd:"B"});\n`;
+    `queue.push({cmd:"move",params:{direction:"backward"}});\n`;
 
   javascriptGenerator.forBlock[BLOCK_TYPES.TURN_LEFT] = () =>
-    `queue.push({cmd:"TURN:L:90"});\n`;
+    `queue.push({cmd:"turn",params:{direction:"left",degrees:90}});\n`;
 
   javascriptGenerator.forBlock[BLOCK_TYPES.TURN_RIGHT] = () =>
-    `queue.push({cmd:"TURN:R:90"});\n`;
+    `queue.push({cmd:"turn",params:{direction:"right",degrees:90}});\n`;
 
   javascriptGenerator.forBlock[BLOCK_TYPES.TURN_LEFT_ANGLE] = (block) => {
     const angle = Math.max(
       1,
       Math.min(360, Math.round(Number(block.getFieldValue("ANGLE") || 90))),
     );
-    return `queue.push({cmd:"TURN:L:${angle}"});\n`;
+    return `queue.push({cmd:"turn",params:{direction:"left",degrees:${angle}}});\n`;
   };
 
   javascriptGenerator.forBlock[BLOCK_TYPES.TURN_RIGHT_ANGLE] = (block) => {
@@ -37,20 +38,20 @@ export function initBeetleBotGenerator(): void {
       1,
       Math.min(360, Math.round(Number(block.getFieldValue("ANGLE") || 90))),
     );
-    return `queue.push({cmd:"TURN:R:${angle}"});\n`;
+    return `queue.push({cmd:"turn",params:{direction:"right",degrees:${angle}}});\n`;
   };
 
   javascriptGenerator.forBlock[BLOCK_TYPES.STOP] = () =>
-    `queue.push({cmd:"S"});\n`;
+    `queue.push({cmd:"stop"});\n`;
 
   // ========================================================================
   // 🤖 ACTIONS
   // ========================================================================
   javascriptGenerator.forBlock[BLOCK_TYPES.GRAB] = () =>
-    `queue.push({cmd:"C"});\n`;
+    `queue.push({cmd:"grab"});\n`;
 
   javascriptGenerator.forBlock[BLOCK_TYPES.RELEASE] = () =>
-    `queue.push({cmd:"O"});\n`;
+    `queue.push({cmd:"release"});\n`;
 
   // ========================================================================
   // ⏱️ TIME
@@ -253,11 +254,6 @@ javascriptGenerator.forBlock[BLOCK_TYPES.VARIABLE_CHANGE] = (
     ];
   };
 
-  javascriptGenerator.forBlock[BLOCK_TYPES.TOF_TRIGGER_CLAW] = (block) => {
-    const enable = block.getFieldValue("STATE") === "ON" ? 1 : 0;
-    return `queue.push({cmd:"TOF_TRIGGER", val:${enable}});\n`;
-  };
-
   javascriptGenerator.forBlock[BLOCK_TYPES.WAIT_FOR_OBJECT] = (
     block,
     generator,
@@ -272,16 +268,12 @@ const PREAMBLE = `
 var queue=[];
 var currentSpeed=100;
 async function sendCommand(cmd) {
-  const res = await wifi.sendRawCommandWithResponse(cmd);
+  const res = await wifi.sendCommandWithResponse(cmd);
   return res;
 }
 async function getDistance() {
-  const res = await sendCommand('DIST');
-  if (!res) return -1;
-  var idx = res.lastIndexOf(':');
-  var num = idx >= 0 ? res.substring(idx + 1) : res;
-  var val = parseInt(num, 10);
-  return isNaN(val) ? -1 : val;
+  // Use cached distance from ESP32 broadcast (updated every ~150ms)
+  return wifi.getLatestDistance();
 }
 async function checkDistanceThreshold(threshold, op) {
   const d = await getDistance();
@@ -305,7 +297,7 @@ export function generateCode(workspace: Blockly.Workspace): string {
 
 export function buildProgram(
   code: string,
-  wifi: { sendRawCommandWithResponse(cmd: string, timeoutMs?: number): Promise<string | null> },
+  wifi: { sendCommandWithResponse(cmd: object, timeoutMs?: number): Promise<any | null> },
 ): () => Promise<CommandItem[]> {
   const fullCode = `${PREAMBLE}return (async () => { ${code}return queue; })();`;
   const fn = new Function('wifi', fullCode);
@@ -314,12 +306,12 @@ export function buildProgram(
 
 export async function generateCommandQueue(
   workspace: Blockly.Workspace,
-  wifi?: { sendRawCommandWithResponse(cmd: string, timeoutMs?: number): Promise<string | null> },
+  wifi?: { sendCommandWithResponse(cmd: object, timeoutMs?: number): Promise<any | null> },
 ): Promise<CommandItem[]> {
   const code = generateCode(workspace);
   if (!code.trim()) return [];
 
-  const run = buildProgram(code, wifi ?? { sendRawCommandWithResponse: async () => null });
+  const run = buildProgram(code, wifi ?? { sendCommandWithResponse: async () => null });
   try {
     const result = await run();
     return Array.isArray(result) ? result : [];

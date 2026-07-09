@@ -52,7 +52,6 @@ export const BLOCK_TYPES = {
   // 📡 Sensors (Cyan)
   READ_DISTANCE: "read_distance",
   DISTANCE_THRESHOLD: "distance_threshold",
-  TOF_TRIGGER_CLAW: "tof_trigger_claw",
   WAIT_FOR_OBJECT: "wait_for_object",
 } as const;
 
@@ -598,24 +597,6 @@ tooltip: "Change a variable by a value (positive or negative)",
       output: "Boolean",
       colour: COLOUR_SENSORS,
       tooltip: "Compare TOF distance to threshold",
-    },
-    {
-      type: BLOCK_TYPES.TOF_TRIGGER_CLAW,
-      message0: "🎯 TOF Auto-Trigger %1",
-      args0: [
-        {
-          type: "field_dropdown",
-          name: "STATE",
-          options: [
-            ["ON", "ON"],
-            ["OFF", "OFF"],
-          ],
-        },
-      ],
-      previousStatement: null,
-      nextStatement: null,
-      colour: COLOUR_SENSORS,
-      tooltip: "Enable/disable automatic claw trigger when object detected",
     },
     {
       type: BLOCK_TYPES.WAIT_FOR_OBJECT,

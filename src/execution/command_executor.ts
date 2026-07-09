@@ -84,24 +84,15 @@ export class CommandExecutor {
       }
     }
 
-    // Kill motors + clear firmware command queue + disable TOF auto-trigger
-    this.wifi.sendCommand('S').catch(() => {});
-    this.wifi.sendCommand('CLEAR').catch(() => {});
-    this.wifi.sendCommand('TOF_TRIGGER:0').catch(() => {});
+    // Kill motors + clear firmware command queue
+    this.wifi.sendCommand({cmd:"stop"}).catch(() => {});
+    this.wifi.sendCommand({cmd:"clear"}).catch(() => {});
     return endIdx + 1;
   }
 
   private async readDistance(): Promise<number> {
-    try {
-      const res = await this.wifi.sendRawCommandWithResponse('DIST');
-      if (!res) return -1;
-      const idx = res.lastIndexOf(':');
-      const num = idx >= 0 ? res.substring(idx + 1) : res;
-      const val = parseInt(num, 10);
-      return isNaN(val) ? -1 : val;
-    } catch {
-      return -1;
-    }
+    // Use the cached distance from the WebSocket broadcast
+    return this.wifi.getLatestDistance();
   }
 
   private compareDist(d: number, threshold: number, op: string): boolean {
@@ -119,7 +110,7 @@ export class CommandExecutor {
   stop(): void {
     if (this.abortController) this.abortController.abort();
     this.running = false;
-    this.wifi.sendCommand('CLEAR').catch(() => {});
+    this.wifi.sendCommand({cmd:"clear"}).catch(() => {});
   }
 
   private async executeItem(item: CommandItem, signal?: AbortSignal): Promise<void> {
@@ -128,19 +119,18 @@ export class CommandExecutor {
         await this.sleep(item.ms || 0, signal);
         break;
       case 'SPEED':
-        await this.wifi.sendCommand(`SPEED:${item.val}`);
+        await this.wifi.sendCommand({cmd:"speed", params:{value: item.val}});
         break;
       case 'SPEED_DELTA': {
-        const sign = (item.val || 0) >= 0 ? '+' : '-';
-        await this.wifi.sendCommand(sign);
+        const dir = (item.val || 0) >= 0 ? 'increase' : 'decrease';
+        await this.wifi.sendCommand({cmd:"speed", params:{delta: dir}});
         break;
       }
-      case 'TOF_TRIGGER':
-        await this.wifi.sendCommand(`TOF_TRIGGER:${item.val}`);
-        break;
-      default:
-        await this.wifi.sendCommand(item.cmd);
+      default: {
+        const jsonCmd = item.params ? { cmd: item.cmd, params: item.params } : { cmd: item.cmd };
+        await this.wifi.sendCommand(jsonCmd);
         await this.sleep(50, signal);
+      }
     }
   }
 
