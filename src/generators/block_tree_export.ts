@@ -36,8 +36,7 @@ const STATEMENT_BLOCK_TYPES = new Set<string>([
 
 const VALUE_BLOCK_TYPES = new Set<string>([
   BLOCK_TYPES.READ_DISTANCE,
-  BLOCK_TYPES.DISTANCE_THRESHOLD,
-  BLOCK_TYPES.WAIT_FOR_OBJECT,
+  BLOCK_TYPES.DISTANCE_CHECK,
   BLOCK_TYPES.COMPARE,
   BLOCK_TYPES.LOGIC_AND,
   BLOCK_TYPES.LOGIC_OR,
@@ -102,23 +101,10 @@ function serializeCondition(block: Blockly.Block): string {
     return "getDistance()";
   }
 
-  if (type === BLOCK_TYPES.DISTANCE_THRESHOLD) {
-    const op = block.getFieldValue("OP") || "LT";
-    const thresholdBlock = block.getInputTargetBlock("THRESHOLD");
-    const threshold = thresholdBlock ? serializeCondition(thresholdBlock) : "200";
-    return `checkDistanceThreshold(${threshold}, "${op}")`;
-  }
-
   if (type === BLOCK_TYPES.VARIABLE_GET) {
     const varName = block.getFieldValue("VAR_NAME") || "counter";
     const safeName = varName.replace(/[^a-zA-Z0-9_]/g, "_");
     return safeName;
-  }
-
-  if (type === BLOCK_TYPES.WAIT_FOR_OBJECT) {
-    const thresholdBlock = block.getInputTargetBlock("THRESHOLD");
-    const threshold = thresholdBlock ? serializeCondition(thresholdBlock) : "200";
-    return `waitForObject(${threshold})`;
   }
 
   return "";

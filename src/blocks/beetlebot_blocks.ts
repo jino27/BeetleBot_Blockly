@@ -51,8 +51,7 @@ export const BLOCK_TYPES = {
 
   // 📡 Sensors (Cyan)
   READ_DISTANCE: "read_distance",
-  DISTANCE_THRESHOLD: "distance_threshold",
-  WAIT_FOR_OBJECT: "wait_for_object",
+  DISTANCE_CHECK: "distance_check",
 } as const;
 
 // ============================================================================
@@ -573,7 +572,7 @@ tooltip: "Change a variable by a value (positive or negative)",
       tooltip: "Read distance from TOF sensor in millimeters",
     },
     {
-      type: BLOCK_TYPES.DISTANCE_THRESHOLD,
+      type: BLOCK_TYPES.DISTANCE_CHECK,
       message0: "📏 Distance %1 %2 mm",
       args0: [
         {
@@ -581,11 +580,11 @@ tooltip: "Change a variable by a value (positive or negative)",
           name: "OP",
           options: [
             ["<", "LT"],
-            ["≤", "LTE"],
             [">", "GT"],
-            ["≥", "GTE"],
             ["=", "EQ"],
             ["≠", "NEQ"],
+            ["≥", "GTE"],
+            ["≤", "LTE"],
           ],
         },
         {
@@ -596,22 +595,8 @@ tooltip: "Change a variable by a value (positive or negative)",
       ],
       output: "Boolean",
       colour: COLOUR_SENSORS,
-      tooltip: "Compare TOF distance to threshold",
+      tooltip: "Check if distance is less than, greater than, or equal to a threshold",
     },
-    {
-      type: BLOCK_TYPES.WAIT_FOR_OBJECT,
-      message0: "⏳ Wait for Object < %1 mm",
-      args0: [
-        {
-          type: "input_value",
-          name: "THRESHOLD",
-          check: "Number",
-        },
-      ],
-      previousStatement: null,
-      nextStatement: null,
-      colour: COLOUR_SENSORS,
-      tooltip: "Wait until object detected within threshold distance",
-    },
+
   ]);
 }

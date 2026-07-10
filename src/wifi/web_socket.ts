@@ -1,3 +1,6 @@
+export type ProgramDoneCallback = (aborted: boolean) => void;
+export type ExecBlockCallback = (blockType: string) => void;
+
 export class WiFiWebSocket {
   private ws: WebSocket | null = null;
   private connected = false;
@@ -5,6 +8,8 @@ export class WiFiWebSocket {
   private msgId = 0;
   private pending = new Map<number, (data: any) => void>();
   private latestDistance = -1;
+  private onProgramDone: ProgramDoneCallback | null = null;
+  private onExecBlock: ExecBlockCallback | null = null;
 
   constructor(espIp: string = "192.168.4.1") {
     this.espIp = espIp;
@@ -22,6 +27,14 @@ export class WiFiWebSocket {
     this.espIp = ip;
   }
 
+  setOnProgramDone(cb: ProgramDoneCallback | null): void {
+    this.onProgramDone = cb;
+  }
+
+  setOnExecBlock(cb: ExecBlockCallback | null): void {
+    this.onExecBlock = cb;
+  }
+
   async connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       const url = `ws://${this.espIp}:8266`;
@@ -36,13 +49,26 @@ export class WiFiWebSocket {
         const data = event.data.toString().trim();
         try {
           const parsed = JSON.parse(data);
-          
-          // Handle distance broadcast from ESP32
+
           if (parsed.event === "distance" && typeof parsed.value === "number") {
             this.latestDistance = parsed.value;
             return;
           }
-          
+
+          if (parsed.event === "program_done") {
+            if (this.onProgramDone) {
+              this.onProgramDone(!!parsed.aborted);
+            }
+            return;
+          }
+
+          if (parsed.event === "exec" && parsed.block) {
+            if (this.onExecBlock) {
+              this.onExecBlock(parsed.block);
+            }
+            return;
+          }
+
           // Handle command responses with id correlation
           if (parsed.id !== undefined && this.pending.has(parsed.id)) {
             const resolver = this.pending.get(parsed.id)!;
