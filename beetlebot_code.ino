@@ -10,6 +10,7 @@
 // Wire + VL53L0X for TOF distance broadcast
 #include <Wire.h>
 #include <VL53L0X.h>
+#define ARDUINOJSON_DEFAULT_NESTING_LIMIT 50
 #include <ArduinoJson.h>
 
 // ============== AP CONFIG ==============
@@ -404,6 +405,416 @@ WebSocketsServer webSocket = WebSocketsServer(8266);
 CommandQueue cmdQueue;
 uint8_t activeClient = 255;
 
+// ============== INTERPRETER GLOBALS ==============
+static volatile bool stopRequested = false;
+static volatile bool programRunning = false;
+static TaskHandle_t interpreterTaskHandle = nullptr;
+
+#define MAX_VARS 16
+struct VarSlot {
+  char name[24];
+  float value;
+  bool used;
+};
+static VarSlot varTable[MAX_VARS];
+
+static float getVariable(const char* name);
+static void setVariable(const char* name, float value);
+
+struct InterpreterParams {
+  String treeStr;
+  RobotContext* robot;
+  WebSocketsServer* ws;
+  uint8_t clientNum;
+};
+
+static void interpreterTask(void* pvParameters);
+static void executeBlockSet(JsonArray set);
+static bool evalCondition(JsonVariant condNode);
+static float resolveValue(JsonVariant valueNode);
+static void interruptibleDelay(unsigned long ms);
+
+static void broadcastEvent(const char* event, const char* blockType, bool useWs = true);
+
+// ============== VARIABLE STORAGE ==============
+static float getVariable(const char* name) {
+  for (int i = 0; i < MAX_VARS; i++) {
+    if (varTable[i].used && strcmp(varTable[i].name, name) == 0) {
+      return varTable[i].value;
+    }
+  }
+  return 0.0f;
+}
+
+static void setVariable(const char* name, float value) {
+  for (int i = 0; i < MAX_VARS; i++) {
+    if (varTable[i].used && strcmp(varTable[i].name, name) == 0) {
+      varTable[i].value = value;
+      return;
+    }
+  }
+  for (int i = 0; i < MAX_VARS; i++) {
+    if (!varTable[i].used) {
+      strncpy(varTable[i].name, name, 23);
+      varTable[i].name[23] = '\0';
+      varTable[i].value = value;
+      varTable[i].used = true;
+      return;
+    }
+  }
+}
+
+// ============== INTERRUPTIBLE DELAY ==============
+static void interruptibleDelay(unsigned long ms) {
+  unsigned long start = millis();
+  while (millis() - start < ms) {
+    if (stopRequested) return;
+    vTaskDelay(10 / portTICK_PERIOD_MS);
+  }
+}
+
+// ============== BROADCAST HELPER ==============
+static void broadcastEvent(const char* event, const char* blockType, bool useWs) {
+  if (!useWs || activeClient == 255) return;
+  StaticJsonDocument<128> d;
+  d["event"] = event;
+  d["block"] = blockType;
+  String json;
+  serializeJson(d, json);
+  webSocket.sendTXT(activeClient, json);
+}
+
+// ============== RECURSIVE TREE WALKER ==============
+
+static float resolveValue(JsonVariant node) {
+  if (!node.containsKey("type")) return 0.0f;
+  const char* type = node["type"].as<const char*>();
+
+  if (strcmp(type, "math_number") == 0) {
+    return node["fields"]["NUM"].as<float>();
+  }
+  if (strcmp(type, "read_distance") == 0) {
+    return robot->getTOF().readDistance();
+  }
+  if (strcmp(type, "variable_get") == 0) {
+    const char* varName = node["fields"]["VAR_NAME"].as<const char*>();
+    return getVariable(varName);
+  }
+  if (strcmp(type, "math_arithmetic") == 0) {
+    const char* op = node["fields"]["OP"].as<const char*>();
+    float a = 0, b = 0;
+    if (node["inputs"].containsKey("A")) {
+      a = resolveValue(node["inputs"]["A"]);
+    }
+    if (node["inputs"].containsKey("B")) {
+      b = resolveValue(node["inputs"]["B"]);
+    }
+    if (strcmp(op, "ADD") == 0 || strcmp(op, "+") == 0) return a + b;
+    if (strcmp(op, "MINUS") == 0 || strcmp(op, "-") == 0) return a - b;
+    if (strcmp(op, "MULTIPLY") == 0 || strcmp(op, "*") == 0) return a * b;
+    if (strcmp(op, "DIVIDE") == 0 || strcmp(op, "/") == 0) return (b != 0) ? a / b : 0;
+    return 0;
+  }
+  if (strcmp(type, "beetlebot_true") == 0) return 1.0f;
+  if (strcmp(type, "beetlebot_false") == 0) return 0.0f;
+  return 0.0f;
+}
+
+static bool evalCondition(JsonVariant condNode) {
+  if (!condNode.containsKey("type")) return false;
+  const char* type = condNode["type"].as<const char*>();
+
+  if (strcmp(type, "beetlebot_true") == 0) return true;
+  if (strcmp(type, "beetlebot_false") == 0) return false;
+
+  if (strcmp(type, "beetlebot_and") == 0) {
+    bool a = evalCondition(condNode["inputs"]["A"]);
+    bool b = evalCondition(condNode["inputs"]["B"]);
+    return a && b;
+  }
+  if (strcmp(type, "beetlebot_or") == 0) {
+    bool a = evalCondition(condNode["inputs"]["A"]);
+    bool b = evalCondition(condNode["inputs"]["B"]);
+    return a || b;
+  }
+  if (strcmp(type, "beetlebot_not") == 0) {
+    return !evalCondition(condNode["inputs"]["BOOL"]);
+  }
+  if (strcmp(type, "beetlebot_compare") == 0) {
+    const char* op = condNode["fields"]["OP"].as<const char*>();
+    float a = resolveValue(condNode["inputs"]["A"]);
+    float b = resolveValue(condNode["inputs"]["B"]);
+    if (strcmp(op, "LT") == 0 || strcmp(op, "<") == 0) return a < b;
+    if (strcmp(op, "GT") == 0 || strcmp(op, ">") == 0) return a > b;
+    if (strcmp(op, "EQ") == 0 || strcmp(op, "=") == 0) return a == b;
+    if (strcmp(op, "NEQ") == 0 || strcmp(op, "≠") == 0) return a != b;
+    if (strcmp(op, "GTE") == 0 || strcmp(op, "≥") == 0) return a >= b;
+    if (strcmp(op, "LTE") == 0 || strcmp(op, "≤") == 0) return a <= b;
+    return false;
+  }
+  if (strcmp(type, "distance_check") == 0) {
+    const char* op = condNode["fields"]["OP"].as<const char*>();
+    float dist = robot->getTOF().readDistance();
+    float threshold = resolveValue(condNode["inputs"]["THRESHOLD"]);
+    if (strcmp(op, "LT") == 0) return dist < threshold;
+    if (strcmp(op, "GT") == 0) return dist > threshold;
+    if (strcmp(op, "EQ") == 0) return fabs(dist - threshold) < 1.0f;
+    if (strcmp(op, "NEQ") == 0) return fabs(dist - threshold) >= 1.0f;
+    if (strcmp(op, "GTE") == 0) return dist >= threshold;
+    if (strcmp(op, "LTE") == 0) return dist <= threshold;
+    return false;
+  }
+  return false;
+}
+
+static void executeStatement(JsonVariant node) {
+  if (!node.containsKey("type")) return;
+  const char* type = node["type"].as<const char*>();
+  auto fields = node["fields"].as<JsonObject>();
+  auto inputs = node["inputs"].as<JsonObject>();
+
+  if (strcmp(type, "go_forward") == 0) {
+    cmdQueue.enqueue("F", 0, 1000);
+    while (!cmdQueue.isEmpty() && !stopRequested) {
+      cmdQueue.update(robot, nullptr, 255);
+      vTaskDelay(5 / portTICK_PERIOD_MS);
+    }
+    broadcastEvent("exec", "go_forward");
+    return;
+  }
+  if (strcmp(type, "go_backward") == 0) {
+    cmdQueue.enqueue("B", 0, 1000);
+    while (!cmdQueue.isEmpty() && !stopRequested) {
+      cmdQueue.update(robot, nullptr, 255);
+      vTaskDelay(5 / portTICK_PERIOD_MS);
+    }
+    broadcastEvent("exec", "go_backward");
+    return;
+  }
+  if (strcmp(type, "turn_left") == 0) {
+    cmdQueue.enqueue("L", 90);
+    while (!cmdQueue.isEmpty() && !stopRequested) {
+      cmdQueue.update(robot, nullptr, 255);
+      vTaskDelay(5 / portTICK_PERIOD_MS);
+    }
+    broadcastEvent("exec", "turn_left");
+    return;
+  }
+  if (strcmp(type, "turn_right") == 0) {
+    cmdQueue.enqueue("R", 90);
+    while (!cmdQueue.isEmpty() && !stopRequested) {
+      cmdQueue.update(robot, nullptr, 255);
+      vTaskDelay(5 / portTICK_PERIOD_MS);
+    }
+    broadcastEvent("exec", "turn_right");
+    return;
+  }
+  if (strcmp(type, "turn_left_angle") == 0) {
+    int angle = fields["ANGLE"] | 90;
+    cmdQueue.enqueue("L", angle);
+    while (!cmdQueue.isEmpty() && !stopRequested) {
+      cmdQueue.update(robot, nullptr, 255);
+      vTaskDelay(5 / portTICK_PERIOD_MS);
+    }
+    broadcastEvent("exec", "turn_left_angle");
+    return;
+  }
+  if (strcmp(type, "turn_right_angle") == 0) {
+    int angle = fields["ANGLE"] | 90;
+    cmdQueue.enqueue("R", angle);
+    while (!cmdQueue.isEmpty() && !stopRequested) {
+      cmdQueue.update(robot, nullptr, 255);
+      vTaskDelay(5 / portTICK_PERIOD_MS);
+    }
+    broadcastEvent("exec", "turn_right_angle");
+    return;
+  }
+  if (strcmp(type, "stop") == 0) {
+    cmdQueue.clear();
+    robot->getMotors().stop();
+    broadcastEvent("exec", "stop");
+    return;
+  }
+  if (strcmp(type, "grab") == 0) {
+    robot->getClaw().close();
+    broadcastEvent("exec", "grab");
+    return;
+  }
+  if (strcmp(type, "release") == 0) {
+    robot->getClaw().open();
+    broadcastEvent("exec", "release");
+    return;
+  }
+  if (strcmp(type, "wait") == 0) {
+    float seconds = fields["SECONDS"] | 1.0f;
+    if (inputs.containsKey("SECONDS")) {
+      seconds = resolveValue(inputs["SECONDS"]);
+    }
+    interruptibleDelay((unsigned long)(seconds * 1000));
+    broadcastEvent("exec", "wait");
+    return;
+  }
+  if (strcmp(type, "beetlebot_if") == 0) {
+    bool cond = evalCondition(inputs["CONDITION"]);
+    if (cond) {
+      auto doBody = inputs["DO"].as<JsonArray>();
+      executeBlockSet(doBody);
+    }
+    return;
+  }
+  if (strcmp(type, "beetlebot_if_else") == 0) {
+    bool cond = evalCondition(inputs["CONDITION"]);
+    if (cond) {
+      auto doBody = inputs["DO"].as<JsonArray>();
+      executeBlockSet(doBody);
+    } else {
+      auto elseBody = inputs["ELSE"].as<JsonArray>();
+      executeBlockSet(elseBody);
+    }
+    return;
+  }
+  if (strcmp(type, "while") == 0) {
+    int iterations = 0;
+    while (!stopRequested && evalCondition(inputs["CONDITION"])) {
+      auto body = inputs["DO"].as<JsonArray>();
+      executeBlockSet(body);
+      if (stopRequested) break;
+      interruptibleDelay(150);
+      iterations++;
+      if (iterations > 10000) break;
+    }
+    robot->getMotors().stop();
+    cmdQueue.clear();
+    return;
+  }
+  if (strcmp(type, "repeat_until") == 0) {
+    int iterations = 0;
+    while (!stopRequested) {
+      auto body = inputs["DO"].as<JsonArray>();
+      executeBlockSet(body);
+      if (stopRequested) break;
+      if (evalCondition(inputs["CONDITION"])) break;
+      interruptibleDelay(150);
+      iterations++;
+      if (iterations > 10000) break;
+    }
+    robot->getMotors().stop();
+    cmdQueue.clear();
+    return;
+  }
+  if (strcmp(type, "repeat") == 0) {
+    int times = fields["TIMES"] | 5;
+    if (inputs.containsKey("TIMES")) {
+      times = (int)resolveValue(inputs["TIMES"]);
+    }
+    times = constrain(times, 1, 100);
+    auto body = inputs["DO"].as<JsonArray>();
+    for (int i = 0; i < times && !stopRequested; i++) {
+      executeBlockSet(body);
+    }
+    return;
+  }
+  if (strcmp(type, "count_with") == 0) {
+    const char* varName = fields["VAR"] | "i";
+    int from = (int)resolveValue(inputs["FROM"]);
+    int to = (int)resolveValue(inputs["TO"]);
+    auto body = inputs["DO"].as<JsonArray>();
+    for (int i = from; i <= to && !stopRequested; i++) {
+      setVariable(varName, (float)i);
+      executeBlockSet(body);
+    }
+    return;
+  }
+  if (strcmp(type, "variable_set") == 0) {
+    const char* varName = fields["VAR_NAME"] | "counter";
+    float val = resolveValue(inputs["VALUE"]);
+    setVariable(varName, val);
+    broadcastEvent("exec", "variable_set");
+    return;
+  }
+  if (strcmp(type, "variable_change") == 0) {
+    const char* varName = fields["VAR_NAME"] | "counter";
+    float delta = inputs.containsKey("DELTA") ? resolveValue(inputs["DELTA"]) : 1.0f;
+    float current = getVariable(varName);
+    setVariable(varName, current + delta);
+    broadcastEvent("exec", "variable_change");
+    return;
+  }
+  if (strcmp(type, "variable_increment") == 0) {
+    const char* varName = fields["VAR_NAME"] | "counter";
+    setVariable(varName, getVariable(varName) + 1.0f);
+    broadcastEvent("exec", "variable_increment");
+    return;
+  }
+  if (strcmp(type, "variable_decrement") == 0) {
+    const char* varName = fields["VAR_NAME"] | "counter";
+    setVariable(varName, getVariable(varName) - 1.0f);
+    broadcastEvent("exec", "variable_decrement");
+    return;
+  }
+  if (strcmp(type, "break_loop") == 0) {
+    return;
+  }
+}
+
+static void executeBlockSet(JsonArray set) {
+  for (JsonObject node : set) {
+    if (stopRequested) return;
+    executeStatement(node);
+  }
+}
+
+static void interpreterTask(void* pvParameters) {
+  InterpreterParams* params = (InterpreterParams*)pvParameters;
+  if (!params) {
+    vTaskDelete(nullptr);
+    return;
+  }
+
+  StaticJsonDocument<8192> doc;
+  DeserializationError parseErr = deserializeJson(doc, params->treeStr);
+  if (parseErr) {
+    Serial.println("[INTERP] JSON parse error!");
+    if (params->ws && params->clientNum != 255) {
+      StaticJsonDocument<64> err;
+      err["status"] = "error";
+      err["msg"] = "invalid tree json";
+      String json;
+      serializeJson(err, json);
+      params->ws->sendTXT(params->clientNum, json);
+    }
+    programRunning = false;
+    interpreterTaskHandle = nullptr;
+    delete params;
+    vTaskDelete(nullptr);
+    return;
+  }
+
+  stopRequested = false;
+  programRunning = true;
+
+  JsonArray tree = doc.as<JsonArray>();
+  executeBlockSet(tree);
+
+  robot->getMotors().stop();
+  cmdQueue.clear();
+  programRunning = false;
+  interpreterTaskHandle = nullptr;
+
+  if (params->ws && params->clientNum != 255) {
+    StaticJsonDocument<64> done;
+    done["event"] = "program_done";
+    done["aborted"] = stopRequested;
+    String json;
+    serializeJson(done, json);
+    params->ws->sendTXT(params->clientNum, json);
+  }
+
+  Serial.println("[INTERP] Done");
+  delete params;
+  vTaskDelete(nullptr);
+}
+
 // ============== JSON HELPERS ==============
 String buildJsonResponse(const char* status, const char* action) {
   StaticJsonDocument<128> doc;
@@ -478,10 +889,12 @@ String handleCommand(String raw) {
   }
 
   // Try JSON parse
-  StaticJsonDocument<256> doc;
+  // Use larger buffer for run_program (block tree can be >256 bytes)
+  size_t capacity = (raw.indexOf("\"run_program\"") >= 0) ? 8192 : 256;
+  DynamicJsonDocument doc(capacity);
   DeserializationError err = deserializeJson(doc, raw);
   if (err) {
-    StaticJsonDocument<64> reject;
+    StaticJsonDocument<96> reject;
     reject["status"] = "error";
     reject["msg"] = "invalid json";
     String out;
@@ -576,6 +989,54 @@ String handleCommand(String raw) {
     StaticJsonDocument<64> res;
     res["status"] = "ok";
     res["distance"] = dist;
+    String out;
+    serializeJson(res, out);
+    return out;
+  }
+
+  // Check stop first — even mid-program, a new stop must be honored immediately
+  if (programRunning && strcmp(cmd, "stop") == 0) {
+    stopRequested = true;
+    cmdQueue.clear();
+    robot->getMotors().stop();
+    StaticJsonDocument<64> res;
+    res["status"] = "ok";
+    res["cmd"] = "stop";
+    String out;
+    serializeJson(res, out);
+    return out;
+  }
+
+  // run_program: spawns interpreter task on Core 1
+  if (strcmp(cmd, "run_program") == 0) {
+    if (programRunning) {
+      StaticJsonDocument<64> res;
+      res["status"] = "error";
+      res["msg"] = "already_running";
+      String out;
+      serializeJson(res, out);
+      return out;
+    }
+    if (!doc.containsKey("tree") || !doc["tree"].is<JsonArray>()) {
+      StaticJsonDocument<64> res;
+      res["status"] = "error";
+      res["msg"] = "missing tree";
+      String out;
+      serializeJson(res, out);
+      return out;
+    }
+    String treeStr;
+    serializeJson(doc["tree"], treeStr);
+    for (int i = 0; i < MAX_VARS; i++) varTable[i].used = false;
+    InterpreterParams* taskParams = new InterpreterParams();
+    taskParams->treeStr = treeStr;
+    taskParams->robot = robot;
+    taskParams->ws = &webSocket;
+    taskParams->clientNum = activeClient;
+    xTaskCreatePinnedToCore(interpreterTask, "interp", 16384, taskParams, 1, &interpreterTaskHandle, 1);
+    StaticJsonDocument<64> res;
+    res["status"] = "ok";
+    res["cmd"] = "run_program";
     String out;
     serializeJson(res, out);
     return out;
