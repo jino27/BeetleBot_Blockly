@@ -1,22 +1,15 @@
 import * as Blockly from "blockly/core";
-import { javascriptGenerator } from "blockly/javascript";
 import "blockly/blocks";
 import { registerFieldAngle } from "@blockly/field-angle";
 
 import { defineBeetleBotBlocks } from "./blocks/beetlebot_blocks";
-import {
-  initBeetleBotGenerator,
-  generateCode,
-  CommandItem,
-} from "./generators/beetlebot_generator";
+import "./generators/beetlebot_generator";
 import { WiFiWebSocket } from "./wifi/web_socket";
-import { CommandExecutor } from "./execution/command_executor";
-import { blocklyToBlockTree} from "./generators/block_tree_export";
+import { blocklyToBlockTree } from "./generators/block_tree_export";
 import "./styles.css";
 
 let workspace: Blockly.WorkspaceSvg;
 let wifi: WiFiWebSocket;
-let executor: CommandExecutor;
 
 // ============================================================================
 // COLORS
@@ -154,8 +147,7 @@ function getToolbox(): Blockly.utils.toolbox.ToolboxDefinition {
         colour: COLOUR_SENSORS,
         contents: [
           { kind: "block", type: "read_distance" },
-          { kind: "block", type: "distance_threshold" },
-          { kind: "block", type: "wait_for_object" },
+          { kind: "block", type: "distance_check" },
         ],
       },
 
@@ -182,8 +174,6 @@ function getToolbox(): Blockly.utils.toolbox.ToolboxDefinition {
 document.addEventListener("DOMContentLoaded", () => {
   registerFieldAngle();
   defineBeetleBotBlocks();
-  initBeetleBotGenerator();
-
   workspace = Blockly.inject("blocklyDiv", {
     toolbox: getToolbox(),
     theme: Blockly.Themes.Zelos,
@@ -202,16 +192,25 @@ document.addEventListener("DOMContentLoaded", () => {
   (document.getElementById("esp-ip") as HTMLInputElement).value = savedIp;
 
   wifi = new WiFiWebSocket(savedIp);
-  //TEMP for Testing-----------------
-  executor = new CommandExecutor(wifi);
+  // Expose for debugging
   (window as any).wifi = wifi;
-  (window as any).executor = executor;
   (window as any).blocklyToBlockTree = blocklyToBlockTree;
   (window as any).workspace = workspace;
+
+  // Wire ESP32-side interpreter callbacks
+  wifi.setOnProgramDone((aborted) => {
+    const btn = document.getElementById("btn-run") as HTMLButtonElement;
+    btn.textContent = "▶ Run Program";
+    btn.disabled = false;
+    log(aborted ? "Program aborted" : "Program done", "received");
+  });
+  wifi.setOnExecBlock((blockType) => {
+    log(`exec: ${blockType}`, "received");
+  });
   
   //----------------------------------
   workspace.addChangeListener(() => {
-    if (!executor.isRunning) updatePreview();
+    if (wifi.isConnected) updatePreview();
   });
 
   setupUI();
@@ -222,27 +221,20 @@ function setupUI(): void {
     .getElementById("btn-connect")!
     .addEventListener("click", toggleConnect);
   document.getElementById("btn-save-ip")!.addEventListener("click", saveIp);
-  document
-    .getElementById("btn-fwd")!
-    .addEventListener("click", () => send(JSON.stringify({cmd:"move",params:{direction:"forward"}})));
-  document
-    .getElementById("btn-bwd")!
-    .addEventListener("click", () => send(JSON.stringify({cmd:"move",params:{direction:"backward"}})));
-  document
-    .getElementById("btn-left")!
-    .addEventListener("click", () => send(JSON.stringify({cmd:"turn",params:{direction:"left",degrees:90}})));
-  document
-    .getElementById("btn-right")!
-    .addEventListener("click", () => send(JSON.stringify({cmd:"turn",params:{direction:"right",degrees:90}})));
-  document
-    .getElementById("btn-stop")!
-    .addEventListener("click", () => send(JSON.stringify({cmd:"stop"})));
-  document
-    .getElementById("btn-open")!
-    .addEventListener("click", () => send(JSON.stringify({cmd:"release"})));
-  document
-    .getElementById("btn-close")!
-    .addEventListener("click", () => send(JSON.stringify({cmd:"grab"})));
+  document.getElementById("btn-fwd")!.addEventListener("click", () =>
+    wifi.sendCommand({cmd:"move",params:{direction:"forward"}}).catch(() => {}));
+  document.getElementById("btn-bwd")!.addEventListener("click", () =>
+    wifi.sendCommand({cmd:"move",params:{direction:"backward"}}).catch(() => {}));
+  document.getElementById("btn-left")!.addEventListener("click", () =>
+    wifi.sendCommand({cmd:"turn",params:{direction:"left",degrees:90}}).catch(() => {}));
+  document.getElementById("btn-right")!.addEventListener("click", () =>
+    wifi.sendCommand({cmd:"turn",params:{direction:"right",degrees:90}}).catch(() => {}));
+  document.getElementById("btn-stop")!.addEventListener("click", () =>
+    wifi.sendCommand({cmd:"stop"}).catch(() => {}));
+  document.getElementById("btn-open")!.addEventListener("click", () =>
+    wifi.sendCommand({cmd:"release"}).catch(() => {}));
+  document.getElementById("btn-close")!.addEventListener("click", () =>
+    wifi.sendCommand({cmd:"grab"}).catch(() => {}));
   document.getElementById("btn-run")!.addEventListener("click", runProgram);
   document
     .getElementById("btn-stop-program")!
@@ -281,29 +273,9 @@ async function toggleConnect(): Promise<void> {
   }
 }
 
-async function send(jsonCmd: string): Promise<void> {
-  if (!wifi.isConnected) {
-    log("Not connected", "error");
-    return;
-  }
-  try {
-    const cmd = JSON.parse(jsonCmd);
-    await wifi.sendCommand(cmd);
-    log(`→ ${jsonCmd}`, "sent");
-  } catch (err: any) {
-    log(err.message, "error");
-  }
-}
-
 async function runProgram(): Promise<void> {
-  const topBlocks = workspace.getTopBlocks(false);
-  if (!topBlocks.length) {
-    log("No blocks", "error");
-    return;
-  }
-
-  const code = generateCode(workspace);
-  if (!code.trim()) {
+  const tree = blocklyToBlockTree(workspace);
+  if (!tree.length) {
     log("No blocks", "error");
     return;
   }
@@ -313,26 +285,23 @@ async function runProgram(): Promise<void> {
   btn.disabled = true;
 
   try {
-    await executor.runCode(code);
-    log("Done", "sent");
+    await wifi.sendCommand({ cmd: "run_program", tree });
+    log("Program sent to robot", "sent");
   } catch (err: any) {
-    log(err.message, "error");
-  } finally {
+    log(`Failed: ${err.message}`, "error");
     btn.textContent = "▶ Run Program";
     btn.disabled = false;
   }
 }
 
 function stopProgram(): void {
-  executor.stop();
-  log("Stopped", "error");
+  wifi.sendCommand({ cmd: "stop" }).catch(() => {});
+  log("Stop sent", "sent");
 }
 
 function updatePreview(): void {
-  // Only generate the code string - don't execute it!
-  // Executing while loops during editing can cause crashes
-  const code = javascriptGenerator.workspaceToCode(workspace);
-  const text = code || "// Drag blocks here";
+  const tree = blocklyToBlockTree(workspace);
+  const text = tree.length ? JSON.stringify(tree, null, 2) : "// Drag blocks to workspace";
   const el = document.getElementById("code-preview");
   if (el) el.textContent = text;
 }

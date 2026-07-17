@@ -17,32 +17,44 @@ No lint, test, or typecheck scripts exist. TypeScript strict mode is on (`tsconf
 ## Architecture
 
 ```
-src/index.ts                    ← entry point, Blockly workspace setup, UI wiring
-src/blocks/beetlebot_blocks.ts  ← Blockly block definitions (JSON arrays)
-src/generators/beetlebot_generator.ts  ← block → JS code generators (queue.push format)
-src/execution/command_executor.ts      ← runs generated command queue over WiFi
-src/wifi/web_socket.ts          ← WebSocket to ESP32 (ws://<ip>:8266)
+src/
+├── index.ts                    Entry point — Blockly workspace, UI wiring
+├── styles.css                  All application styles (dark theme)
+├── blocks/
+│   └── beetlebot_blocks.ts     Blockly block definitions (JSON)
+├── generators/
+│   ├── block_tree_export.ts    Converts workspace → JSON tree
+│   └── beetlebot_generator.ts  (legacy — empty, interpreter drives WS directly)
+├── execution/
+│   ├── interpreter.ts          Tree-walking interpreter (browser-side)
+│   ├── command_executor.ts     Abort controller + command lifecycle
+│   └── expr_eval.ts            Custom expression lexer/parser/evaluator
+├── wifi/
+│   └── web_socket.ts           WebSocket client (ws://<ip>:8266)
+└── assets/
+    └── img/
+        └── beetlebot.png       Robot logo image
 ```
 
-**Key flow:** Blocks → `beetlebot_generator.ts` produces JS that pushes `{cmd, val, ms}` objects to a `queue[]` array → `command_executor.ts` iterates the queue and sends each command over WebSocket.
+**Key flow:** Blocks → `block_tree_export.ts` produces a JSON tree → `interpreter.ts` walks the tree and generates commands → `command_executor.ts` sends each command over WebSocket via `web_socket.ts`.
 
 ## Adding or modifying blocks
 
 1. Define the block JSON in `src/blocks/beetlebot_blocks.ts` (add to `BLOCK_TYPES` const and `defineBeetleBotBlocks()`)
-2. Register a generator in `src/generators/beetlebot_generator.ts` (`javascriptGenerator.forBlock[...]`)
-3. Add the block to the toolbox in `src/index.ts` `getToolbox()`
+2. Add the block to the toolbox in `src/index.ts` `getToolbox()`
+3. (Optional) Register a legacy generator in `src/generators/beetlebot_generator.ts` if needed for Blockly's built-in preview.
 
 Block type strings must match exactly across all three locations.
 
 ## Gotchas
 
-- **Generated code is JS, not C++.** The generator outputs JavaScript that runs in-browser via `new Function()`. The `PREAMBLE` string in `beetlebot_generator.ts` defines the runtime (`sendCommand`, `getDistance`, `sleep`, etc.). Changes to the preamble affect runtime behavior.
-- **While loops with TOF sensors** are handled specially: `_WHILE`/`_ENDWHILE` sentinel commands in the queue are intercepted by `CommandExecutor.executeRealTimeWhile()`, not evaluated as JS loops. This is because sensor reads need real-time WebSocket calls.
-- **`updatePreview()` uses `javascriptGenerator.workspaceToCode()`** (Blockly's built-in), not the custom generator. This is intentional — executing the custom generator during editing can crash on while loops.
+- **Interpreter drives execution, not the generator.** `interpreter.ts` is the source of truth for block-to-command logic. `beetlebot_generator.ts` exists but is not used at runtime.
+- **Expression evaluation is custom.** `expr_eval.ts` provides a lexer/parser/evaluator for block expressions. It uses a custom grammar, not JavaScript `eval()`.
+- **`updatePreview()` uses `javascriptGenerator.workspaceToCode()`** (Blockly's built-in), not the custom generator. This is intentional — executing the interpreter during editing can crash on while loops.
 - **WebSocket protocol:** Commands are plain strings (`F`, `B`, `L`, `R`, `S`, `C`, `O`, `TURN:L:90`, `DIST`, `SPEED:100`, `CLEAR`, `TOF_TRIGGER:0/1`). Responses use format `id:data` for request/response matching, or plain text for unsolicited data.
 - **Default robot IP** is `192.168.4.1` (ESP32 AP mode). Stored in `localStorage` as `esp32-ip`.
 - **PWA:** `service-worker.js` and `manifest.json` exist. Service worker caches `index.html` and `manifest.json`.
-- **`beetlebot_code.ino`** at root is a generated Arduino sketch artifact — not the source of truth. The real logic is in the TypeScript generators.
+- **`beetlebot_code.ino`** at root is a generated Arduino sketch artifact — not the source of truth. The real logic is in the TypeScript interpreters.
 
 ## Design system
 

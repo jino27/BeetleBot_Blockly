@@ -65,17 +65,6 @@ function nodeToExpr(node: BlockTreeNode): string {
         : "false";
       return `!${bool}`;
     }
-    case "distance_threshold": {
-      const op = (node.fields?.OP as string) || "LT";
-      const inputs = node.inputs || {};
-      const threshold = inputs.THRESHOLD
-        ? nodeToExpr(inputs.THRESHOLD as BlockTreeNode)
-        : "200";
-      const opMap: Record<string, string> = {
-        LT: "<", LTE: "<=", GT: ">", GTE: ">=", EQ: "==", NEQ: "!=",
-      };
-      return `__distance__ ${opMap[op] || "<"} ${threshold}`;
-    }
     case "math_arithmetic": {
       const op = (node.fields?.OP as string) || "ADD";
       const inputs = node.inputs || {};
@@ -379,20 +368,6 @@ async function executeStatement(
     // ── Loop control ──
     case "break_loop":
       return;
-
-    // ── wait_for_object (special: polls distance with cached reads) ──
-    case "wait_for_object": {
-      const thresholdNode = getInputValue(node, "THRESHOLD");
-      const threshold = thresholdNode
-        ? Number(resolveValue(thresholdNode, ctx))
-        : 200;
-      while (!ctx.signal?.aborted) {
-        const dist = ctx.wifi.getLatestDistance();
-        if (dist >= 0 && dist < threshold) break;
-        await sleep(150, ctx);
-      }
-      break;
-    }
 
     default:
       break;
